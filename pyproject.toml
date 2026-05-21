@@ -1,0 +1,42 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = [
+  "setuptools>=61",
+  "setuptools-scm>=8",
+  "wheel",
+]
+
+[project]
+name = "cc-plugin-obs4mips"
+description = "Compliance Checker plugin for WCRP-ESMO obs4MIPs"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+maintainers = [
+  { name = "Morgan Steckler", email = "stecklermr@ornl.gov" },
+]
+requires-python = ">=3.10"
+dependencies = [
+    "compliance-checker>=6.1.0",
+]
+dynamic = ["version"]
+urls.documentation = "http://ioos.github.io/compliance-checker/"
+urls.homepage = "https://github.com/WCRP-ESMO/cc-plugin-obs4mips"
+urls.repository = "https://github.com/WCRP-ESMO/cc-plugin-obs4mips"
+entry-points."compliance_checker.suites".obs4mips = "cc_plugin_obs4mips.obs4mips:Obs4MipsCheck"
+
+[tool.setuptools]
+packages = ["cc_plugin_obs4mips"]
+
+[tool.setuptools_scm]
+version_file = "cc_plugin_obs4mips/_version.py"
+# Accept tags with or without a "v" prefix
+tag_regex = "^v?(?P<version>\\d+\\.\\d+\\.\\d+.*)$"
+# Stable fallback for when there are no tags yet (e.g. fresh clone of a fork)
+fallback_version = "0.0.0"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]

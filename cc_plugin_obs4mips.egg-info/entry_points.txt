@@ -1,0 +1,2 @@
+[compliance_checker.suites]
+obs4mips = cc_plugin_obs4mips.obs4mips:Obs4MipsCheck
