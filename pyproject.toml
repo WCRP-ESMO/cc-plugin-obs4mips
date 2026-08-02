@@ -27,8 +27,11 @@ urls.repository = "https://github.com/WCRP-ESMO/cc-plugin-obs4mips"
 "obs4mips" = "cc_plugin_obs4mips.checks.ods_2_6:Obs4Mips2_6Check"
 "obs4mips:2.6" = "cc_plugin_obs4mips.checks.ods_2_6:Obs4Mips2_6Check"
 
-[tool.setuptools]
-packages = ["cc_plugin_obs4mips"]
+[tool.setuptools.packages.find]
+include = ["cc_plugin_obs4mips*"]
+
+[tool.setuptools.package-data]
+cc_plugin_obs4mips = ["cv_data/**/*.json"]
 
 [tool.setuptools_scm]
 version_file = "cc_plugin_obs4mips/_version.py"

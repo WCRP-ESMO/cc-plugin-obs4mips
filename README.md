@@ -19,3 +19,12 @@ compliance-checker -t obs4mips [dataset.nc]
 ```
 
 Replace `[dataset.nc]` with the path to your NetCDF dataset. The tool will output a report indicating whether the dataset is compliant with the obs4MIPs data standard and will list any issues found. See the [IOOS Compliance Checker documentation](https://ioos.github.io/compliance-checker/) for additional usage notes and options.
+
+## Controlled vocabularies
+
+Controlled-vocabulary snapshots used at runtime are stored under
+`cc_plugin_obs4mips/cv_data/<version>/`. The ODS 2.6.1 frequency vocabulary is
+derived from the `drs_name` fields in the official
+[`WCRP-ESMO/obs4MIPs_CVs`](https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/frequency)
+frequency terms. Each snapshot records its upstream commit so validation remains
+reproducible even while the upstream vocabulary evolves.
