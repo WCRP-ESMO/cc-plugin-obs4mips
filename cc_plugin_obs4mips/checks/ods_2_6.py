@@ -10,4 +10,5 @@ class Obs4Mips2_6Check(Obs4MipsBaseCheck):
     _cc_description = "WCRP-ESMO obs4MIPs 2.6 compliance checks"
     _cc_checker_version = __version__
     SPECS = GLOBAL_ATTR_SPECS
-    CV_VERSION = "2.6"
+    # The ODS 2.6.1 CV release retains the ODS-2.6 metadata identifier.
+    CV_VERSION = "2.6.1"
