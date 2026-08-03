@@ -52,9 +52,8 @@ def is_valid_tracking_id(v: str) -> bool:
 
 
 def is_conventions_string(v: str) -> bool:
-    """Require the two ODS conventions as complete, separated tokens."""
-    tokens = set(re.split(r"[\s,;]+", v.strip()))
-    return {"CF-1.11", "ODS-2.6"}.issubset(tokens)
+    """Require ODS-2.6.1 as a complete token in a space-separated list."""
+    return "ODS-2.6.1" in v.split()
 
 
 def is_clean_source_id(v: str) -> bool:
@@ -74,7 +73,7 @@ def is_url(v: str) -> bool:
 
 
 def is_processing_code_location(v: str) -> bool:
-    """Require a permalink to code in the obs4MIPs CMOR-tables repository."""
+    """Check for a revision-pinned script in the recommended obs4MIPs repo."""
     if not is_url(v):
         return False
     parsed = urlsplit(v)
@@ -85,10 +84,11 @@ def is_processing_code_location(v: str) -> bool:
         return False
     organization, repository, view, revision = parts[:4]
     return (
-        organization in {"PCMDI", "WCRP-ESMO"}
-        and repository == "obs4MIPs-cmor-tables"
+        organization == "WCRP-ESMO"
+        and repository == "obs4MIPs"
         and view in {"blob", "tree"}
         and bool(_GIT_REF.fullmatch(revision))
+        and parts[4] == "examples"
     )
 
 
@@ -157,7 +157,7 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
         "Conventions",
         REQUIRED,
         format_check=is_conventions_string,
-        format_hint="must contain 'CF-1.11' and 'ODS-2.6'",
+        format_hint="must contain 'ODS-2.6.1' as a space-separated convention",
     ),
     AttrSpec(
         "creation_date",
@@ -205,11 +205,8 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     AttrSpec(
         "processing_code_location",
         REQUIRED,
-        format_check=is_processing_code_location,
-        format_hint=(
-            "must be a revision-pinned GitHub URL in the PCMDI or WCRP-ESMO "
-            "obs4MIPs-cmor-tables repository"
-        ),
+        format_check=is_url,
+        format_hint="must be an absolute HTTP(S) URL",
     ),
     AttrSpec("product", REQUIRED, cv="product", cv_strictness="error"),
     AttrSpec("realm", REQUIRED, cv="realm", cv_strictness="error"),

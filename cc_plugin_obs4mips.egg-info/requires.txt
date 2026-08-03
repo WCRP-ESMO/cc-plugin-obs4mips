@@ -1,1 +1,0 @@
-compliance-checker>=6.1.0
