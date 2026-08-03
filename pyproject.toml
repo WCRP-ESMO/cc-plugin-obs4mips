@@ -17,11 +17,15 @@ maintainers = [
 requires-python = ">=3.10"
 dependencies = [
     "compliance-checker>=6.1.0",
+    "netCDF4>=1.6.4",
 ]
 dynamic = ["version"]
 urls.documentation = "http://ioos.github.io/compliance-checker/"
 urls.homepage = "https://github.com/WCRP-ESMO/cc-plugin-obs4mips"
 urls.repository = "https://github.com/WCRP-ESMO/cc-plugin-obs4mips"
+
+[project.scripts]
+obs4mips-dataset-summary = "cc_plugin_obs4mips.dataset_summary:main"
 
 [project.entry-points."compliance_checker.suites"]
 "obs4mips" = "cc_plugin_obs4mips.checks.ods_2_6_1:Obs4Mips2_6_1Check"

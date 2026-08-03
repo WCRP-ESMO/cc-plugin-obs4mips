@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from difflib import get_close_matches
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
@@ -51,6 +52,44 @@ class _CVRegistry:
     def is_loaded(self, version: str, table: str) -> bool:
         """Check if CV table is available (i.e. file exists and loaded successfully)."""
         return self._load(version, table) is not None
+
+    def values(self, version: str, table: str) -> frozenset[str]:
+        """Return registered values, or an empty set when the table is unavailable."""
+        return self._load(version, table) or frozenset()
+
+    def metadata(self, version: str, table: str) -> dict:
+        """Return the generation metadata stored with a packaged CV snapshot."""
+        env_path = os.environ.get(f"OBS4MIPS_CV_{table.upper()}")
+        try:
+            payload = (
+                json.loads(Path(env_path).read_text())
+                if env_path
+                else json.loads(
+                    files(self._package)
+                    .joinpath("cv_data", version, f"{table}.json")
+                    .read_text()
+                )
+            )
+        except (FileNotFoundError, ModuleNotFoundError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            key: payload[key]
+            for key in ("cv", "cv_version", "source", "source_ref", "value_field")
+            if key in payload
+        }
+
+    def suggestions(
+        self, version: str, table: str, value: str, *, limit: int = 3
+    ) -> list[str]:
+        """Return similar registered values, comparing without regard to case."""
+        values = sorted(self.values(version, table))
+        by_folded = {candidate.casefold(): candidate for candidate in values}
+        matches = get_close_matches(
+            value.casefold(), list(by_folded), n=limit, cutoff=0.5
+        )
+        return [by_folded[match] for match in matches]
 
 
 # Create a global CV registry instance for use in checks

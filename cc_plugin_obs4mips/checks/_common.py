@@ -78,13 +78,37 @@ class Obs4MipsBaseCheck(BaseNCCheck):
                 continue
             value = getattr(ds, spec.name)
             weight = REQUIRED if spec.cv_strictness == "error" else RECOMMENDED
-            valid = CV.contains(self.CV_VERSION, spec.cv, value)
+            if not CV.is_loaded(self.CV_VERSION, spec.cv):
+                continue
+            values = (
+                value.split()
+                if isinstance(value, str)
+                and spec.name in {"activity_id", "realm", "region"}
+                else [value]
+            )
+            messages = []
+            for candidate in values:
+                if not isinstance(candidate, str) or CV.contains(
+                    self.CV_VERSION, spec.cv, candidate
+                ):
+                    continue
+                message = (
+                    f"{spec.name}={candidate!r} is not registered in CV "
+                    f"{spec.cv!r}. Before requesting a new term, check whether an "
+                    "existing CV term should be used."
+                )
+                suggestions = CV.suggestions(self.CV_VERSION, spec.cv, candidate)
+                if suggestions:
+                    message += " Similar registered terms: " + ", ".join(
+                        repr(suggestion) for suggestion in suggestions
+                    )
+                messages.append(message)
             results.append(
                 Result(
                     weight,
-                    valid,
-                    "Global attribute CV membership",
-                    [] if valid else [f"{spec.name}={value!r} not in CV '{spec.cv}'"],
+                    not messages,
+                    "Unregistered controlled vocabulary terms",
+                    messages,
                 )
             )
         return results
@@ -228,11 +252,12 @@ class Obs4MipsBaseCheck(BaseNCCheck):
         return Result(
             RECOMMENDED,
             valid,
-            "License references a Creative Commons license",
+            "license",
             []
             if valid
             else [
-                "ODS recommends referencing a Creative Commons license; other "
-                "license terms remain permitted"
+                f"license={license_text!r} does not reference a Creative Commons "
+                "license. ODS recommends referencing one; other license terms "
+                "remain permitted"
             ],
         )
