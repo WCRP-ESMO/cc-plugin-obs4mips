@@ -28,3 +28,22 @@ derived from the `drs_name` fields in the official
 [`WCRP-ESMO/obs4MIPs_CVs`](https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/frequency)
 frequency terms. Each snapshot records its upstream commit so validation remains
 reproducible even while the upstream vocabulary evolves.
+
+The snapshots are generated files; do not edit them manually. Source repositories,
+pinned revisions, and table mappings are declared in `cv_sources.json`. To update
+all configured tables after deliberately changing a pinned revision, run:
+
+```bash
+python scripts/sync_cvs.py --ods-version 2.6.1
+```
+
+The command downloads that exact revision, validates each upstream term, extracts
+the configured value field, and writes a deterministic package snapshot. To use an
+existing checkout without network access, pass `--source /path/to/obs4MIPs_CVs`.
+
+CI and local verification can detect an out-of-date generated snapshot without
+changing files:
+
+```bash
+python scripts/sync_cvs.py --ods-version 2.6.1 --check
+```
