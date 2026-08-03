@@ -1,10 +1,10 @@
 import pytest
 from compliance_checker.base import BaseCheck
 
-from cc_plugin_obs4mips.checks.ods_2_6 import Obs4Mips2_6Check
+from cc_plugin_obs4mips.checks import Obs4Mips2_6_1Check as PublicChecker
+from cc_plugin_obs4mips.checks.ods_2_6_1 import Obs4Mips2_6_1Check
 from cc_plugin_obs4mips.cv import CV
-from cc_plugin_obs4mips.obs4mips import Obs4MipsCheck
-from cc_plugin_obs4mips.specs.ods_2_6 import (
+from cc_plugin_obs4mips.specs.ods_2_6_1 import (
     GLOBAL_ATTR_SPECS,
     is_bare_doi,
     is_conventions_string,
@@ -54,12 +54,14 @@ def spec_named(name):
     return next(spec for spec in GLOBAL_ATTR_SPECS if spec.name == name)
 
 
-def test_legacy_checker_import_is_compatible():
-    assert Obs4MipsCheck is Obs4Mips2_6Check
+def test_checker_identifies_ods_2_6_1():
+    assert PublicChecker is Obs4Mips2_6_1Check
+    assert Obs4Mips2_6_1Check._cc_spec_version == "2.6.1"
+    assert Obs4Mips2_6_1Check.CV_VERSION == "2.6.1"
 
 
 def test_required_global_attributes_pass():
-    check = Obs4Mips2_6Check()
+    check = Obs4Mips2_6_1Check()
     dataset = dataset_with_all_attributes()
     check.setup(dataset)
 
@@ -70,7 +72,7 @@ def test_required_global_attributes_pass():
 
 
 def test_required_global_attribute_missing():
-    check = Obs4Mips2_6Check()
+    check = Obs4Mips2_6_1Check()
     dataset = dataset_with_all_attributes()
     del dataset._attributes["activity_id"]
     check.setup(dataset)
@@ -94,7 +96,7 @@ def test_frequency_cv_rejects_unknown_or_mis_cased_values(frequency):
 
 
 def test_checker_reports_invalid_frequency_as_required():
-    check = Obs4Mips2_6Check()
+    check = Obs4Mips2_6_1Check()
     dataset = DatasetStub({"frequency": "monthly"})
     check.setup(dataset)
 
@@ -115,7 +117,7 @@ def test_title_is_optional_but_encouraged_attributes_are_recommended():
     dataset = dataset_with_all_attributes()
     for name in ("title", "doi", "source_data_retrieval_date", "source_data_url"):
         del dataset._attributes[name]
-    check = Obs4Mips2_6Check()
+    check = Obs4Mips2_6_1Check()
     check.setup(dataset)
 
     results = check.check_global_attributes_present(dataset)
@@ -136,7 +138,7 @@ def test_site_attributes_are_conditional_and_best_estimate_needs_no_variant_info
     del dataset._attributes["site_location"]
     del dataset._attributes["variant_info"]
     dataset._attributes["variant_label"] = "RSS-BE"
-    check = Obs4Mips2_6Check()
+    check = Obs4Mips2_6_1Check()
     check.setup(dataset)
 
     results = check.check_global_attributes_present(dataset)
@@ -152,7 +154,7 @@ def test_site_attributes_are_conditional_and_best_estimate_needs_no_variant_info
 
 
 def test_non_ods_institution_name_heuristic_is_not_registered():
-    check = Obs4Mips2_6Check()
+    check = Obs4Mips2_6_1Check()
 
     assert not hasattr(check, "check_institution_matches_institution_id")
 
@@ -241,7 +243,7 @@ def test_processing_code_location_requires_obs4mips_revision_permalink():
 )
 def test_site_metadata_consistency(attributes, expected):
     dataset = DatasetStub(attributes)
-    check = Obs4Mips2_6Check()
+    check = Obs4Mips2_6_1Check()
     check.setup(dataset)
 
     result = check.check_site_metadata_consistency(dataset)
@@ -266,7 +268,7 @@ def test_anomaly_naming_uses_variable_level_units_metadata(
         {"variable_id": variable_id},
         {variable_id: VariableStub({"units_metadata": units_metadata})},
     )
-    check = Obs4Mips2_6Check()
+    check = Obs4Mips2_6_1Check()
     check.setup(dataset)
 
     result = check.check_anomaly_variable_naming(dataset)
@@ -277,7 +279,7 @@ def test_anomaly_naming_uses_variable_level_units_metadata(
 
 def test_license_recommendation_is_not_a_required_failure():
     dataset = DatasetStub({"license": "UK Open Government Licence v3.0"})
-    check = Obs4Mips2_6Check()
+    check = Obs4Mips2_6_1Check()
     check.setup(dataset)
 
     result = check.check_license_text(dataset)

@@ -24,8 +24,8 @@ urls.homepage = "https://github.com/WCRP-ESMO/cc-plugin-obs4mips"
 urls.repository = "https://github.com/WCRP-ESMO/cc-plugin-obs4mips"
 
 [project.entry-points."compliance_checker.suites"]
-"obs4mips" = "cc_plugin_obs4mips.checks.ods_2_6:Obs4Mips2_6Check"
-"obs4mips:2.6" = "cc_plugin_obs4mips.checks.ods_2_6:Obs4Mips2_6Check"
+"obs4mips" = "cc_plugin_obs4mips.checks.ods_2_6_1:Obs4Mips2_6_1Check"
+"obs4mips:2.6.1" = "cc_plugin_obs4mips.checks.ods_2_6_1:Obs4Mips2_6_1Check"
 
 [tool.setuptools.packages.find]
 include = ["cc_plugin_obs4mips*"]

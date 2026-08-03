@@ -1,4 +1,4 @@
-"""obs4MIPs 2.6 global attribute specification, as data."""
+"""obs4MIPs ODS 2.6.1 global attribute specification."""
 
 from __future__ import annotations
 

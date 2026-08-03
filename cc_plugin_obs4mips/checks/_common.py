@@ -3,7 +3,7 @@
 from compliance_checker.base import BaseCheck, BaseNCCheck, Result
 
 from cc_plugin_obs4mips.cv import CV
-from cc_plugin_obs4mips.specs.ods_2_6 import (
+from cc_plugin_obs4mips.specs.ods_2_6_1 import (
     FORBIDDEN_ID_CHARS,
     RECOMMENDED,
     REQUIRED,
