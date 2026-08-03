@@ -84,9 +84,7 @@ class Obs4MipsBaseCheck(BaseNCCheck):
                     weight,
                     valid,
                     "Global attribute CV membership",
-                    []
-                    if valid
-                    else [f"{spec.name}={value!r} not in CV '{spec.cv}'"],
+                    [] if valid else [f"{spec.name}={value!r} not in CV '{spec.cv}'"],
                 )
             )
         return results
@@ -106,63 +104,135 @@ class Obs4MipsBaseCheck(BaseNCCheck):
             [] if valid else [f"source_id={ds.source_id!r} != expected {expected!r}"],
         )
 
-    def check_institution_matches_institution_id(self, ds):
-        """Check that institution references institution_id."""
-        if not {"institution", "institution_id"}.issubset(self._attrs):
+    def check_anomaly_variable_naming(self, ds):
+        """Keep variable-level difference metadata and the ``anom`` suffix aligned."""
+        if "variable_id" not in self._attrs:
             return None
-        institution = ds.institution
-        institution_id = ds.institution_id
-        valid = institution_id in institution or any(
-            part and part in institution for part in institution_id.split("-")
+
+        variable_id = ds.variable_id
+        variables = getattr(ds, "variables", {})
+        variable = variables.get(variable_id)
+        if variable is None:
+            return None
+
+        units_metadata = getattr(variable, "units_metadata", None)
+        is_difference = isinstance(units_metadata, str) and (
+            "difference" in units_metadata.lower()
+        )
+        has_anomaly_suffix = variable_id.endswith("anom")
+        if not is_difference and not has_anomaly_suffix:
+            return None
+
+        messages = []
+        if is_difference and not has_anomaly_suffix:
+            messages.append(
+                f"{variable_id}:units_metadata={units_metadata!r} identifies a "
+                "difference, so variable_id must end in 'anom'"
+            )
+        if has_anomaly_suffix and not is_difference:
+            messages.append(
+                f"{variable_id} is an anomaly variable and must define variable-level "
+                "units_metadata identifying it as a difference"
+            )
+        return Result(
+            REQUIRED,
+            not messages,
+            "Anomaly variable naming and units metadata",
+            messages,
+        )
+
+    def check_site_metadata_consistency(self, ds):
+        """Validate the non-CV relationships among ODS site attributes."""
+        values = {
+            name: str(getattr(ds, name, "")).strip()
+            for name in (
+                "product",
+                "nominal_resolution",
+                "grid",
+                "grid_label",
+                "site_id",
+                "site_location",
+            )
+        }
+        lowered = {name: value.lower() for name, value in values.items()}
+        site_markers = {
+            lowered["product"],
+            lowered["nominal_resolution"],
+            lowered["grid"],
+            lowered["grid_label"],
+        }
+        is_collection = "site-collection" in site_markers
+        is_individual = bool(site_markers & {"site", "site-observations"}) or lowered[
+            "grid_label"
+        ].startswith("site-")
+        if not is_collection and not is_individual:
+            return None
+
+        problems = []
+        if is_collection:
+            expected = {
+                "product": "site-collection",
+                "nominal_resolution": "site-collection",
+                "grid": "site-collection",
+                "grid_label": "site-collection",
+                "site_id": "collection",
+                "site_location": "collection",
+            }
+            for name, expected_value in expected.items():
+                if name in self._attrs and lowered[name] != expected_value:
+                    problems.append(
+                        f"{name}={values[name]!r}; expected {expected_value!r} for a "
+                        "site collection"
+                    )
+        else:
+            expected = {
+                "product": "site-observations",
+                "nominal_resolution": "site",
+                "grid": "site",
+            }
+            for name, expected_value in expected.items():
+                if name in self._attrs and lowered[name] != expected_value:
+                    problems.append(
+                        f"{name}={values[name]!r}; expected {expected_value!r} for an "
+                        "individual site"
+                    )
+
+            if "grid_label" in self._attrs:
+                # Appendix 3 says ``site`` while Table 1 says ``site-<site_id>``.
+                # Accept both forms until that draft inconsistency is resolved.
+                allowed_grid_labels = {"site"}
+                if values["site_id"]:
+                    allowed_grid_labels.add(f"site-{lowered['site_id']}")
+                if lowered["grid_label"] not in allowed_grid_labels:
+                    problems.append(
+                        f"grid_label={values['grid_label']!r}; expected 'site' or "
+                        f"'site-{values['site_id']}' for an individual site"
+                    )
+
+        return Result(
+            REQUIRED,
+            not problems,
+            "Site metadata consistency",
+            problems,
+        )
+
+    def check_license_text(self, ds):
+        """Recommend the Creative Commons reference suggested by ODS note 13."""
+        if "license" not in self._attrs:
+            return None
+        license_text = ds.license
+        valid = isinstance(license_text, str) and (
+            "creative commons" in license_text.lower()
+            or "creativecommons.org/licenses/" in license_text.lower()
         )
         return Result(
             RECOMMENDED,
             valid,
-            "institution references institution_id",
+            "License references a Creative Commons license",
             []
             if valid
             else [
-                f"institution={institution!r} does not reference "
-                f"institution_id={institution_id!r}"
-            ],
-        )
-
-    def check_anomaly_variable_naming(self, ds):
-        """Require anomaly variable IDs to end in ``anom``."""
-        if not {"units_metadata", "variable_id"}.issubset(self._attrs):
-            return None
-        if "difference" not in ds.units_metadata.lower():
-            return None
-        valid = ds.variable_id.endswith("anom")
-        return Result(
-            REQUIRED,
-            valid,
-            "anomaly variables suffixed with 'anom'",
-            []
-            if valid
-            else [
-                f"units_metadata={ds.units_metadata!r} indicates an anomaly; "
-                f"variable_id={ds.variable_id!r} should end in 'anom'"
-            ],
-        )
-
-    def check_license_text(self, ds):
-        """Check that the license references CC BY 4.0."""
-        if "license" not in self._attrs:
-            return None
-        license_text = ds.license
-        valid = (
-            "CC BY 4.0" in license_text
-            or "creativecommons.org/licenses/by/4.0" in license_text
-        )
-        return Result(
-            REQUIRED,
-            valid,
-            "license references CC-BY-4.0",
-            []
-            if valid
-            else [
-                "license should reference 'CC BY 4.0' and "
-                "https://creativecommons.org/licenses/by/4.0/"
+                "ODS recommends referencing a Creative Commons license; other "
+                "license terms remain permitted"
             ],
         )

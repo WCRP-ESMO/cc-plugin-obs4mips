@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Callable, Optional
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from compliance_checker.base import BaseCheck
@@ -21,8 +22,13 @@ OPTIONAL = BaseCheck.LOW  # 1 — shows as Info
 
 _ISO_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 _TRACKING_ID = re.compile(r"^hdl:21\.14102/(?P<uuid>[0-9a-f-]{36})$", re.IGNORECASE)
-_NOMINAL_RES = re.compile(r"^\d+(\.\d+)?\s*km$|^\d+x\d+\s*degree$", re.IGNORECASE)
-_URL = re.compile(r"^https?://", re.IGNORECASE)
+_NOMINAL_RES = re.compile(
+    r"^(?:\d+(?:\.\d+)?\s*km|\d+(?:\.\d+)?x\d+(?:\.\d+)?\s*degree|"
+    r"site(?:-collection)?)$",
+    re.IGNORECASE,
+)
+_DOI = re.compile(r"^10\.\d{4,9}/\S+$", re.IGNORECASE)
+_GIT_REF = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
 
 # Forbidden in source_id per the spec
 FORBIDDEN_ID_CHARS = re.compile(r"[._() :/]")
@@ -46,8 +52,9 @@ def is_valid_tracking_id(v: str) -> bool:
 
 
 def is_conventions_string(v: str) -> bool:
-    """Check if string contains both 'CF-1.11' and 'ODS-2.6' (order doesn't matter)"""
-    return "CF-1.11" in v and "ODS-2.6" in v
+    """Require the two ODS conventions as complete, separated tokens."""
+    tokens = set(re.split(r"[\s,;]+", v.strip()))
+    return {"CF-1.11", "ODS-2.6"}.issubset(tokens)
 
 
 def is_clean_source_id(v: str) -> bool:
@@ -56,24 +63,42 @@ def is_clean_source_id(v: str) -> bool:
 
 
 def is_bare_doi(v: str) -> bool:
-    """Check if string looks like a bare DOI without http(s) or 'doi:' prefix"""
-    return not v.lower().startswith(("http://", "https://", "doi:"))
+    """Check for the bare DOI form shown in ODS Table 1."""
+    return bool(_DOI.fullmatch(v))
 
 
 def is_url(v: str) -> bool:
-    """Check if string is a valid URL starting with http:// or https://"""
-    return bool(_URL.match(v))
+    """Check for an absolute HTTP(S) URL."""
+    parsed = urlsplit(v)
+    return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
+
+
+def is_processing_code_location(v: str) -> bool:
+    """Require a permalink to code in the obs4MIPs CMOR-tables repository."""
+    if not is_url(v):
+        return False
+    parsed = urlsplit(v)
+    if parsed.scheme.lower() != "https" or parsed.netloc.lower() != "github.com":
+        return False
+    parts = parsed.path.strip("/").split("/")
+    if len(parts) < 5:
+        return False
+    organization, repository, view, revision = parts[:4]
+    return (
+        organization in {"PCMDI", "WCRP-ESMO"}
+        and repository == "obs4MIPs-cmor-tables"
+        and view in {"blob", "tree"}
+        and bool(_GIT_REF.fullmatch(revision))
+    )
 
 
 def is_boolean_string(v: str) -> bool:
-    """Check if string is 'TRUE' or 'FALSE' (case-insensitive)"""
+    """Check for the uppercase TRUE/FALSE form required by ODS Table 1."""
     return v in ("TRUE", "FALSE")
 
 
 def is_nominal_resolution(v: str) -> bool:
-    """
-    Check if string is in expected format for nominal_resolution: '# km' or '#x# degree'
-    """
+    """Check numeric and site-specific ODS nominal-resolution forms."""
     return bool(_NOMINAL_RES.match(v))
 
 
@@ -88,13 +113,18 @@ def has_aux_unc_true(ds) -> bool:
 
 
 def grid_is_site(ds) -> bool:
-    """Check if dataset grid attribute is 'site' or 'site-collection' (case-insensitive)"""
-    return str(getattr(ds, "grid", "")).strip().lower() in ("site", "site-collection")
+    """Identify site data even when one of its related attributes is incorrect."""
+    values = {
+        str(getattr(ds, name, "")).strip().lower()
+        for name in ("grid", "grid_label", "nominal_resolution", "product")
+    }
+    return bool(values & {"site", "site-observations", "site-collection"})
 
 
 def variant_is_not_be(ds) -> bool:
-    """Check if dataset variant_label attribute is not 'BE' (case-insensitive)"""
-    return str(getattr(ds, "variant_label", "")).strip().upper() != "BE"
+    """Check whether the variant is not an institutional best-estimate label."""
+    label = str(getattr(ds, "variant_label", "")).strip().upper()
+    return label != "BE" and not label.endswith("-BE")
 
 
 ########################################################################################
@@ -144,9 +174,9 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         "doi",
-        OPTIONAL,
+        RECOMMENDED,
         format_check=is_bare_doi,
-        format_hint="should be a bare DOI without http(s) or 'doi:' prefix",
+        format_hint="must be a bare DOI such as '10.1234/example'",
     ),
     AttrSpec(
         "external_variables", OPTIONAL, cv="external_variables", cv_strictness="error"
@@ -170,20 +200,29 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
         cv="nominal_resolution",
         cv_strictness="warn",
         format_check=is_nominal_resolution,
-        format_hint="expected '# km' or '#x# degree'",
+        format_hint="expected '# km', '#x# degree', 'site', or 'site-collection'",
     ),
     AttrSpec(
         "processing_code_location",
         REQUIRED,
-        format_check=is_url,
-        format_hint="must be an http(s) URL",
+        format_check=is_processing_code_location,
+        format_hint=(
+            "must be a revision-pinned GitHub URL in the PCMDI or WCRP-ESMO "
+            "obs4MIPs-cmor-tables repository"
+        ),
     ),
     AttrSpec("product", REQUIRED, cv="product", cv_strictness="error"),
     AttrSpec("realm", REQUIRED, cv="realm", cv_strictness="error"),
     AttrSpec("references", REQUIRED),
     AttrSpec("region", REQUIRED, cv="region", cv_strictness="error"),
     AttrSpec("site_id", REQUIRED, required_if=grid_is_site),
-    AttrSpec("site_location", REQUIRED, cv="site_location", cv_strictness="warn"),
+    AttrSpec(
+        "site_location",
+        REQUIRED,
+        required_if=grid_is_site,
+        cv="site_location",
+        cv_strictness="warn",
+    ),
     AttrSpec("source", REQUIRED, cv="source", cv_strictness="warn"),
     AttrSpec(
         "source_id",
@@ -203,25 +242,24 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     AttrSpec("source_data_notes", OPTIONAL),
     AttrSpec(
         "source_data_retrieval_date",
-        OPTIONAL,
+        RECOMMENDED,
         format_check=is_iso_utc,
         format_hint="must be ISO-8601 UTC: YYYY-MM-DDTHH:MM:SSZ",
     ),
     AttrSpec(
         "source_data_url",
-        OPTIONAL,
+        RECOMMENDED,
         format_check=is_url,
         format_hint="must be an http(s) URL",
     ),
     AttrSpec("source_type", REQUIRED, cv="source_type", cv_strictness="error"),
-    AttrSpec("title", REQUIRED),
+    AttrSpec("title", OPTIONAL),
     AttrSpec(
         "tracking_id",
         REQUIRED,
         format_check=is_valid_tracking_id,
         format_hint="must be 'hdl:21.14102/<uuid>' with a valid UUID",
     ),
-    AttrSpec("units_metadata", OPTIONAL),
     AttrSpec("variable_id", REQUIRED, cv="variable_id", cv_strictness="warn"),
     AttrSpec("variant_info", RECOMMENDED, required_if=variant_is_not_be),
     AttrSpec("variant_label", REQUIRED),
