@@ -39,7 +39,9 @@ def load_config(path: Path, ods_version: str) -> dict[str, Any]:
     repository = config.get("repository")
     source_ref = config.get("ref")
     tables = config.get("tables")
-    if not isinstance(repository, str) or not repository.startswith("https://github.com/"):
+    if not isinstance(repository, str) or not repository.startswith(
+        "https://github.com/"
+    ):
         raise SyncError("'repository' must be an https://github.com URL")
     if not isinstance(source_ref, str) or not source_ref:
         raise SyncError("'ref' must be a non-empty tag or commit")
@@ -50,7 +52,9 @@ def load_config(path: Path, ods_version: str) -> dict[str, Any]:
 
 def _github_archive_url(repository: str, source_ref: str) -> str:
     """Return GitHub's tar archive URL for a repository and ref."""
-    repository_path = repository.removeprefix("https://github.com/").removesuffix(".git")
+    repository_path = repository.removeprefix("https://github.com/").removesuffix(
+        ".git"
+    )
     if repository_path.count("/") != 1:
         raise SyncError(f"Unsupported GitHub repository URL: {repository}")
     return f"https://codeload.github.com/{repository_path}/tar.gz/{source_ref}"
@@ -70,13 +74,17 @@ def download_source(repository: str, source_ref: str, destination: Path) -> Path
             members = tar.getmembers()
             roots = {Path(member.name).parts[0] for member in members if member.name}
             if len(roots) != 1:
-                raise SyncError("CV source archive must contain exactly one root directory")
+                raise SyncError(
+                    "CV source archive must contain exactly one root directory"
+                )
             for member in members:
                 member_path = Path(member.name)
                 if member_path.is_absolute() or ".." in member_path.parts:
                     raise SyncError(f"Unsafe path in CV source archive: {member.name}")
                 if member.issym() or member.islnk():
-                    raise SyncError(f"Links are not allowed in CV source archive: {member.name}")
+                    raise SyncError(
+                        f"Links are not allowed in CV source archive: {member.name}"
+                    )
             if sys.version_info >= (3, 12):
                 tar.extractall(destination, filter="data")
             else:  # pragma: no cover - Python 3.10/3.11 compatibility
@@ -87,17 +95,22 @@ def download_source(repository: str, source_ref: str, destination: Path) -> Path
     return destination / roots.pop()
 
 
-def read_table(source_root: Path, table: str, value_field: str) -> list[str]:
-    """Validate an upstream collection and extract its DRS values."""
+def read_table(
+    source_root: Path,
+    table: str,
+    value_field: str,
+    *,
+    fallback_field: str | None = None,
+    term_types: list[str] | None = None,
+) -> list[str]:
+    """Validate an upstream collection and extract its checkable values."""
     table_root = source_root / table
     if not table_root.is_dir():
         raise SyncError(f"CV collection does not exist: {table_root}")
 
     values: list[str] = []
     term_files = sorted(
-        path
-        for path in table_root.glob("*.json")
-        if not path.name.startswith("000_")
+        path for path in table_root.glob("*.json") if not path.name.startswith("000_")
     )
     if not term_files:
         raise SyncError(f"CV collection contains no term JSON files: {table_root}")
@@ -113,22 +126,29 @@ def read_table(source_root: Path, table: str, value_field: str) -> list[str]:
         term_id = term.get("id")
         term_type = term.get("type")
         value = term.get(value_field)
+        if (not isinstance(value, str) or not value) and fallback_field:
+            value = term.get(fallback_field)
         if not isinstance(term_id, str) or not term_id:
             raise SyncError(f"CV term has no non-empty string 'id': {term_file}")
-        if term_type != table:
+        expected_types = term_types or [table]
+        if term_type not in expected_types:
             raise SyncError(
-                f"CV term {term_id!r} has type {term_type!r}; expected {table!r}"
+                f"CV term {term_id!r} has type {term_type!r}; expected one of "
+                f"{expected_types!r}"
             )
         if not isinstance(value, str) or not value:
+            expected_fields = repr(value_field)
+            if fallback_field:
+                expected_fields += f" or fallback {fallback_field!r}"
             raise SyncError(
-                f"CV term {term_id!r} has no non-empty string {value_field!r}"
+                f"CV term {term_id!r} has no non-empty string {expected_fields}"
             )
         values.append(value)
 
     duplicates = sorted({value for value in values if values.count(value) > 1})
     if duplicates:
         raise SyncError(
-            f"CV collection {table!r} has duplicate {value_field} values: "
+            f"CV collection {table!r} has duplicate extracted values: "
             + ", ".join(duplicates)
         )
     return sorted(values)
@@ -141,6 +161,7 @@ def render_snapshot(
     repository: str,
     source_ref: str,
     value_field: str,
+    fallback_field: str | None,
     values: list[str],
 ) -> str:
     """Render a stable, reviewable snapshot document."""
@@ -153,6 +174,9 @@ def render_snapshot(
         "value_field": value_field,
         "values": values,
     }
+    if fallback_field:
+        payload["fallback_field"] = fallback_field
+        payload["values"] = payload.pop("values")
     return json.dumps(payload, indent=2, sort_keys=False) + "\n"
 
 
@@ -183,9 +207,7 @@ def sync(
     with tempfile.TemporaryDirectory(prefix="obs4mips-cvs-") as temp_dir:
         actual_source_root = source_root
         if actual_source_root is None:
-            actual_source_root = download_source(
-                repository, source_ref, Path(temp_dir)
-            )
+            actual_source_root = download_source(repository, source_ref, Path(temp_dir))
 
         changed: list[Path] = []
         for table in table_names:
@@ -193,13 +215,32 @@ def sync(
             value_field = table_config.get("value_field")
             if not isinstance(value_field, str) or not value_field:
                 raise SyncError(f"Table {table!r} has no valid 'value_field'")
-            values = read_table(actual_source_root, table, value_field)
+            fallback_field = table_config.get("fallback_field")
+            if fallback_field is not None and (
+                not isinstance(fallback_field, str) or not fallback_field
+            ):
+                raise SyncError(f"Table {table!r} has no valid 'fallback_field'")
+            term_types = table_config.get("term_types")
+            if term_types is not None and (
+                not isinstance(term_types, list)
+                or not term_types
+                or not all(isinstance(item, str) and item for item in term_types)
+            ):
+                raise SyncError(f"Table {table!r} has no valid 'term_types'")
+            values = read_table(
+                actual_source_root,
+                table,
+                value_field,
+                fallback_field=fallback_field,
+                term_types=term_types,
+            )
             rendered = render_snapshot(
                 ods_version=ods_version,
                 table=table,
                 repository=repository,
                 source_ref=source_ref,
                 value_field=value_field,
+                fallback_field=fallback_field,
                 values=values,
             )
             output_path = output_root / ods_version / f"{table}.json"

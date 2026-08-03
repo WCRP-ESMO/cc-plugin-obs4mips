@@ -6,6 +6,9 @@ import pytest
 from scripts.sync_cvs import SyncError, read_table, sync
 
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
 def write_term(root: Path, name: str, **overrides):
     term = {
         "id": name,
@@ -42,7 +45,7 @@ def test_read_table_extracts_sorted_drs_names(tmp_path):
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"type": "grid_label"}, "expected 'frequency'"),
+        ({"type": "grid_label"}, "expected one of.*frequency"),
         ({"drs_name": ""}, "no non-empty string 'drs_name'"),
     ],
 )
@@ -51,6 +54,18 @@ def test_read_table_rejects_malformed_terms(tmp_path, overrides, message):
 
     with pytest.raises(SyncError, match=message):
         read_table(tmp_path, "frequency", "drs_name")
+
+
+def test_read_table_supports_fallback_fields_and_legacy_types(tmp_path):
+    write_term(tmp_path, "metno", type="organisation", drs_name="")
+
+    assert read_table(
+        tmp_path,
+        "frequency",
+        "drs_name",
+        fallback_field="id",
+        term_types=["frequency", "organisation"],
+    ) == ["metno"]
 
 
 def test_sync_writes_snapshot_and_check_detects_drift(tmp_path):
@@ -96,3 +111,13 @@ def test_sync_writes_snapshot_and_check_detects_drift(tmp_path):
         selected_tables=None,
         check=True,
     ) == [snapshot]
+
+
+def test_every_configured_cv_snapshot_is_packaged():
+    config = json.loads((REPOSITORY_ROOT / "cv_sources.json").read_text())
+    configured = set(config["versions"]["2.6.1"]["tables"])
+    snapshot_root = REPOSITORY_ROOT / "cc_plugin_obs4mips" / "cv_data" / "2.6.1"
+    packaged = {path.stem for path in snapshot_root.glob("*.json")}
+
+    assert len(configured) == 24
+    assert packaged == configured
