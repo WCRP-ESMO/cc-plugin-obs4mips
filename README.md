@@ -28,8 +28,7 @@ compliance-checker -t obs4mips:2.6.1 [dataset.nc]
 
 ## Issue submission artifacts
 
-Create a human-readable Compliance Checker report and a separate machine-readable
-JSON summary of the NetCDF header for attachment to an issue:
+Create a human-readable Compliance Checker report and a separate machine-readable JSON summary of the NetCDF header for attachment to an issue:
 
 ```bash
 compliance-checker \
@@ -43,43 +42,28 @@ obs4mips-dataset-summary \
   [dataset.nc]
 ```
 
-The dataset summary is a parseable equivalent of `ncdump -h`. It includes the
-filename and file format, every global attribute, dimensions and unlimited status,
-coordinate metadata, and data-variable metadata. It deliberately excludes array
-values and the submitter's absolute local path. The top-level `schema_version`
-field provides a stable contract for scripts that process issue attachments.
+The dataset summary is a parseable equivalent of `ncdump -h`. It includes the filename and file format, every global attribute, dimensions and unlimited status, coordinate metadata, and data-variable metadata. It deliberately excludes array values and the submitter's absolute local path. The top-level `schema_version` field provides a stable contract for scripts that process issue attachments.
 
-When a submitted value is not registered in a packaged controlled vocabulary,
-the text report asks the submitter to check for an appropriate existing term and
-shows similar registered values. The JSON summary records the same values under
-`cv_update_candidates`, along with the target collection, membership field,
-pinned CV source, and pointers to the dataset metadata needed by an automated CV
-repository updater.
+When a submitted value is not registered in a packaged controlled vocabulary, the text report asks the submitter to check for an appropriate existing term and shows similar registered values. The JSON summary records the same values under `cv_update_candidates`, along with the target collection, membership field, pinned CV source, and pointers to the dataset metadata needed by an automated CV repository updater.
 
 ## Controlled vocabularies
 
-Controlled-vocabulary snapshots used at runtime are stored under
-`cc_plugin_obs4mips/cv_data/<version>/`. The ODS 2.6.1 snapshots contain every
-collection in the official
-[`WCRP-ESMO/obs4MIPs_CVs`](https://github.com/WCRP-ESMO/obs4MIPs_CVs) repository.
-Each snapshot records its upstream commit and the field used for membership checks,
-so validation remains reproducible even while the upstream vocabulary evolves.
+Controlled-vocabulary snapshots used at runtime are stored under `cc_plugin_obs4mips/cv_data/<version>/`. The ODS 2.6.1 snapshots contain every collection in the official [`WCRP-ESMO/obs4MIPs_CVs`](https://github.com/WCRP-ESMO/obs4MIPs_CVs) repository. Each snapshot records its upstream commit and the field used for membership checks, so validation remains reproducible even while the upstream vocabulary evolves.
 
-The snapshots are generated files; do not edit them manually. Source repositories,
-pinned revisions, and table mappings are declared in `cv_sources.json`. To update
-all configured tables after deliberately changing a pinned revision, run:
+The snapshots are generated files; do not edit them manually. Source repositories, pinned revisions, and table mappings are declared in `cv_sources.json`. To update all configured tables after deliberately changing a pinned revision, run:
 
 ```bash
 python scripts/sync_cvs.py --ods-version 2.6.1
 ```
 
-The command downloads that exact revision, validates each upstream term, extracts
-the configured value field, and writes a deterministic package snapshot. To use an
-existing checkout without network access, pass `--source /path/to/obs4MIPs_CVs`.
+The command downloads that exact revision, validates each upstream term, extracts the configured value field, and writes a deterministic package snapshot. To use an existing checkout without network access, pass `--source /path/to/obs4MIPs_CVs`.
 
-CI and local verification can detect an out-of-date generated snapshot without
-changing files:
+CI and local verification can detect an out-of-date generated snapshot without changing files:
 
 ```bash
 python scripts/sync_cvs.py --ods-version 2.6.1 --check
 ```
+
+## Checks vs Specs
+
+In the `cc_plugin_obs4mips` directory, you will see a `specs` subdirectory and a `checks` subdirectory. The `specs` directory contains a base class in `_base.py` called `AttrSpec`. This custom class is used to store the specifications for each global attribute, including its name, requirement level, controlled vocabulary, and format checks. Also in the `specs` directory are the version-specific specification files, such as `ods_2_6_1.py`, which contains a list called `GLOBAL_ATTR_SPECS` that defines the specifications for all global attributes in that ODS version.

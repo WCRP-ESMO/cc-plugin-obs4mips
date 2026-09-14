@@ -1,19 +1,21 @@
-"""obs4MIPs ODS 2.6.1 global attribute specification."""
+"""
+obs4MIPs ODS 2.6.1 global attribute specifications.
+
+Creates GLOBAL_ATTR_SPECS, which is a list of AttrSpec objects that store a name,
+"""
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from typing import Callable, Optional
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from compliance_checker.base import BaseCheck
-
-# Priority mapping per IOOS compliance-checker conventions
-REQUIRED = BaseCheck.HIGH  # 3 — shows as Errors in the report
-RECOMMENDED = BaseCheck.MEDIUM  # 2 — shows as Warnings
-OPTIONAL = BaseCheck.LOW  # 1 — shows as Info
+from cc_plugin_obs4mips.specs._base import (
+    OPTIONAL,
+    RECOMMENDED,
+    REQUIRED,
+    AttrSpec,
+)
 
 
 ########################################################################################
@@ -130,21 +132,6 @@ def variant_is_not_be(ds) -> bool:
 ########################################################################################
 # Format Validators
 ########################################################################################
-
-
-@dataclass(frozen=True)
-class AttrSpec:
-    """Specification for a single attribute, including its name, requirement level,
-    conditional requirements, CV validation, and format checks.
-    """
-
-    name: str
-    level: int  # REQUIRED / RECOMMENDED / OPTIONAL
-    required_if: Optional[Callable] = None  # ds -> bool; only checked when True
-    cv: Optional[str] = None  # CV table name to validate against
-    cv_strictness: str = "warn"  # "error" or "warn"
-    format_check: Optional[Callable[[str], bool]] = None
-    format_hint: str = ""  # message when format fails
 
 
 # Build the global attribute specs list using the AttrSpec dataclass

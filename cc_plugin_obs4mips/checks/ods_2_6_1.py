@@ -1,3 +1,8 @@
+"""
+ODS 2.6.1 checks include:
+- Any checks already in the base class (see Obs4MipsBaseCheck in _base.py)
+"""
+
 import os
 import re
 from pathlib import Path
@@ -7,14 +12,14 @@ from compliance_checker.base import Result
 from netCDF4 import num2date
 
 from cc_plugin_obs4mips import __version__
-from cc_plugin_obs4mips.checks._common import Obs4MipsBaseCheck
+from cc_plugin_obs4mips.checks._base import Obs4MipsBaseCheck
 from cc_plugin_obs4mips.specs.ods_2_6_1 import (
+    FORBIDDEN_ID_CHARS,
     GLOBAL_ATTR_SPECS,
     RECOMMENDED,
     REQUIRED,
     is_processing_code_location,
 )
-
 
 _FILENAME_COMPONENTS = (
     "variable_id",
@@ -38,7 +43,7 @@ _DIRECTORY_TEMPLATE = (
 _VARIABLE_ID = re.compile(r"^[A-Za-z0-9]+$")
 _FILENAME_TOKEN = re.compile(r"^[A-Za-z0-9-]+$")
 _VERSION = re.compile(r"^v\d{8}$")
-_TIME_RANGE = re.compile(r"^(?P<start>\d+)-(?P<end>\d+)(?P<clim>-clim)?$")
+_TIME_RANGE = re.compile(r"^(?P<start>\d+)-(?P<end>\d+)$")
 _TIME_FORMATS = {
     4: "%Y",
     6: "%Y%m",
@@ -91,7 +96,7 @@ def _parse_time_range(value):
     start, end = match.group("start"), match.group("end")
     if len(start) != len(end) or len(start) not in _TIME_FORMATS or start > end:
         return None
-    return start, end, bool(match.group("clim"))
+    return start, end
 
 
 def _dataset_time_range(ds, precision):
@@ -114,14 +119,6 @@ def _has_time_values(ds):
     try:
         return "time" in ds.variables and len(ds.variables["time"]) > 0
     except (AttributeError, TypeError):
-        return False
-
-
-def _has_climatology(ds):
-    try:
-        time = ds.variables["time"]
-        return "climatology" in time.ncattrs()
-    except (AttributeError, KeyError, TypeError):
         return False
 
 
@@ -155,7 +152,16 @@ class Obs4Mips2_6_1Check(Obs4MipsBaseCheck):
         )
 
     def check_filename(self, ds):
-        """Validate the ODS filename template and its non-CV relationships."""
+        """
+        Validate the ODS filename template and its non-CV relationships.
+
+        Checks the following aspects of the ODS filename:
+        - Correct file extension (.nc)
+        - Valid character usage
+        - Proper structure and components given global attributes
+        - Valid time range format that aligns with actual data
+        - If time invariant (fx), time range not allowed
+        """
         path = _dataset_path(ds)
         if path is None:
             return Result(
@@ -182,6 +188,9 @@ class Obs4Mips2_6_1Check(Obs4MipsBaseCheck):
             )
             return Result(REQUIRED, False, "ODS file name", problems)
 
+        # Constructed using only: a-z, A-Z, 0-9, and the hyphen ("-"), except the
+        # hyphen must not appear in variable_id.
+        # Underscores are prohibited throughout except as shown in the template
         components = dict(zip(_FILENAME_COMPONENTS, parts[:5]))
         for name, value in components.items():
             pattern = _VARIABLE_ID if name == "variable_id" else _FILENAME_TOKEN
@@ -192,6 +201,7 @@ class Obs4Mips2_6_1Check(Obs4MipsBaseCheck):
                     else ("letters, digits, and hyphens")
                 )
                 problems.append(f"file-name {name}={value!r} may contain only {rule}")
+            # Check that the component matches its associated global attribute
             if name in self._attrs:
                 expected = getattr(ds, name)
                 if not isinstance(expected, str) or value != expected:
@@ -202,33 +212,22 @@ class Obs4Mips2_6_1Check(Obs4MipsBaseCheck):
 
         time_range = parts[5] if len(parts) == 6 else None
         frequency = getattr(ds, "frequency", None)
+        # For time-invariant fields, the last segment (time_range) is omitted
         if time_range is not None:
             parsed_time_range = _parse_time_range(time_range)
             if parsed_time_range is None:
                 problems.append(
                     f"time_range={time_range!r} must contain ordered, equally precise "
-                    "CMIP-style dates separated by one hyphen"
+                    "CMIP6 (http://goo.gl/v1drZl) dates separated by one hyphen"
                 )
             else:
-                start, end, has_clim_suffix = parsed_time_range
+                start, end = parsed_time_range
                 expected_precision = _FREQUENCY_PRECISION.get(frequency)
                 if expected_precision is not None and len(start) != expected_precision:
                     problems.append(
                         f"time_range={time_range!r} has {len(start)}-digit labels; "
                         f"frequency={frequency!r} requires {expected_precision}-digit "
                         "labels"
-                    )
-
-                climatology = _has_climatology(ds)
-                if climatology and not has_clim_suffix:
-                    problems.append(
-                        "time_range must end in '-clim' when the time coordinate "
-                        "defines a climatology attribute"
-                    )
-                elif has_clim_suffix and not climatology:
-                    problems.append(
-                        "time_range may end in '-clim' only when the time coordinate "
-                        "defines a climatology attribute"
                     )
 
                 actual_range = _dataset_time_range(ds, len(start))
@@ -263,6 +262,7 @@ class Obs4Mips2_6_1Check(Obs4MipsBaseCheck):
         template_message = f"Directory structure must follow {_DIRECTORY_TEMPLATE}"
         provided_message = f"Provided directory structure: {provided_structure}"
 
+        # Check if directory depth is sufficient for the expected DRS structure
         directories = path.parent.parts
         if path.is_absolute():
             directories = directories[1:]
@@ -279,6 +279,7 @@ class Obs4Mips2_6_1Check(Obs4MipsBaseCheck):
                 ],
             )
 
+        # Ensure that the actual directory components match the expected global attrs
         actual_components = directories[-7:-1]
         version = directories[-1]
         problems = []
@@ -299,8 +300,7 @@ class Obs4Mips2_6_1Check(Obs4MipsBaseCheck):
 
         if not _VERSION.fullmatch(version):
             problems.append(
-                f"DRS version {version!r} does not match the required form: "
-                "'vYYYYMMDD'"
+                f"DRS version {version!r} does not match the required form: 'vYYYYMMDD'"
             )
 
         return Result(
@@ -311,7 +311,156 @@ class Obs4Mips2_6_1Check(Obs4MipsBaseCheck):
             if not problems
             else [
                 template_message,
-                provided_message
-                + "".join(f"\n  - {problem}" for problem in problems),
+                provided_message + "".join(f"\n  - {problem}" for problem in problems),
+            ],
+        )
+
+    def check_source_id_matches_label_and_version(self, ds):
+        """Check source_id against source_label and source_version_number."""
+        needed = {"source_id", "source_label", "source_version_number"}
+        if not needed.issubset(self._attrs):
+            return None
+        expected = f"{ds.source_label}-{ds.source_version_number}"
+        expected = FORBIDDEN_ID_CHARS.sub("-", expected)
+        valid = ds.source_id == expected
+        return Result(
+            REQUIRED,
+            valid,
+            "source_id derived from source_label + source_version_number",
+            [] if valid else [f"source_id={ds.source_id!r} != expected {expected!r}"],
+        )
+
+    def check_anomaly_variable_naming(self, ds):
+        """Keep variable-level difference metadata and the ``anom`` suffix aligned."""
+        if "variable_id" not in self._attrs:
+            return None
+
+        variable_id = ds.variable_id
+        variables = getattr(ds, "variables", {})
+        variable = variables.get(variable_id)
+        if variable is None:
+            return None
+
+        units_metadata = getattr(variable, "units_metadata", None)
+        is_difference = isinstance(units_metadata, str) and (
+            "difference" in units_metadata.lower()
+        )
+        has_anomaly_suffix = variable_id.endswith("anom")
+        if not is_difference and not has_anomaly_suffix:
+            return None
+
+        messages = []
+        if is_difference and not has_anomaly_suffix:
+            messages.append(
+                f"{variable_id}:units_metadata={units_metadata!r} identifies a "
+                "difference, so variable_id must end in 'anom'"
+            )
+        if has_anomaly_suffix and not is_difference:
+            messages.append(
+                f"{variable_id} is an anomaly variable and must define variable-level "
+                "units_metadata identifying it as a difference"
+            )
+        return Result(
+            REQUIRED,
+            not messages,
+            "Anomaly variable naming and units metadata",
+            messages,
+        )
+
+    def check_site_metadata_consistency(self, ds):
+        """Validate the non-CV relationships among ODS site attributes."""
+        values = {
+            name: str(getattr(ds, name, "")).strip()
+            for name in (
+                "product",
+                "nominal_resolution",
+                "grid",
+                "grid_label",
+                "site_id",
+                "site_location",
+            )
+        }
+        lowered = {name: value.lower() for name, value in values.items()}
+        site_markers = {
+            lowered["product"],
+            lowered["nominal_resolution"],
+            lowered["grid"],
+            lowered["grid_label"],
+        }
+        is_collection = "site-collection" in site_markers
+        is_individual = bool(site_markers & {"site", "site-observations"}) or lowered[
+            "grid_label"
+        ].startswith("site-")
+        if not is_collection and not is_individual:
+            return None
+
+        problems = []
+        if is_collection:
+            expected = {
+                "product": "site-collection",
+                "nominal_resolution": "site-collection",
+                "grid": "site-collection",
+                "grid_label": "site-collection",
+                "site_id": "collection",
+                "site_location": "collection",
+            }
+            for name, expected_value in expected.items():
+                if name in self._attrs and lowered[name] != expected_value:
+                    problems.append(
+                        f"{name}={values[name]!r}; expected {expected_value!r} for a "
+                        "site collection"
+                    )
+        else:
+            expected = {
+                "product": "site-observations",
+                "nominal_resolution": "site",
+                "grid": "site",
+            }
+            for name, expected_value in expected.items():
+                if name in self._attrs and lowered[name] != expected_value:
+                    problems.append(
+                        f"{name}={values[name]!r}; expected {expected_value!r} for an "
+                        "individual site"
+                    )
+
+            if "grid_label" in self._attrs:
+                # Appendix 3 says ``site`` while Table 1 says ``site-<site_id>``.
+                # Accept both forms until that draft inconsistency is resolved.
+                allowed_grid_labels = {"site"}
+                if values["site_id"]:
+                    allowed_grid_labels.add(f"site-{lowered['site_id']}")
+                if lowered["grid_label"] not in allowed_grid_labels:
+                    problems.append(
+                        f"grid_label={values['grid_label']!r}; expected 'site' or "
+                        f"'site-{values['site_id']}' for an individual site"
+                    )
+
+        return Result(
+            REQUIRED,
+            not problems,
+            "Site metadata consistency",
+            problems,
+        )
+
+    def check_license_text(self, ds):
+        """Recommend the Creative Commons reference suggested by ODS note 13."""
+        if "license" not in self._attrs:
+            return None
+        license_text = ds.license
+        valid = isinstance(license_text, str) and (
+            "creative commons" in license_text.lower()
+            or "creativecommons.org/licenses/" in license_text.lower()
+            or "cc" in license_text.lower()  # this isn't great, re-do with regex?
+        )
+        return Result(
+            RECOMMENDED,
+            valid,
+            "license",
+            []
+            if valid
+            else [
+                f"license={license_text!r} does not reference a Creative Commons "
+                "license. ODS recommends referencing one; other license terms "
+                "remain permitted"
             ],
         )

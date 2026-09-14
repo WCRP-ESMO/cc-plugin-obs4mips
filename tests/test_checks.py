@@ -4,6 +4,7 @@ from compliance_checker.base import BaseCheck
 from cc_plugin_obs4mips.checks import Obs4Mips2_6_1Check as PublicChecker
 from cc_plugin_obs4mips.checks.ods_2_6_1 import Obs4Mips2_6_1Check
 from cc_plugin_obs4mips.cv import CV
+from cc_plugin_obs4mips.specs._base import AttrSpec
 from cc_plugin_obs4mips.specs.ods_2_6_1 import (
     GLOBAL_ATTR_SPECS,
     is_bare_doi,
@@ -100,6 +101,20 @@ def test_checker_identifies_ods_2_6_1():
     assert Obs4Mips2_6_1Check.CV_VERSION == "2.6.1"
 
 
+def test_checker_uses_compliance_checker_base_api():
+    check = Obs4Mips2_6_1Check(options={"example": True})
+
+    assert isinstance(check, BaseCheck)
+    assert check.options == {"example": True}
+    assert check.get_test_ctx(BaseCheck.HIGH, "example") is not None
+
+
+@pytest.mark.parametrize("level", [0, 4])
+def test_attribute_spec_rejects_unknown_compliance_checker_level(level):
+    with pytest.raises(ValueError, match="Compliance Checker severity"):
+        AttrSpec("example", level)
+
+
 def test_required_global_attributes_pass():
     check = Obs4Mips2_6_1Check()
     dataset = dataset_with_all_attributes()
@@ -122,6 +137,21 @@ def test_required_global_attribute_missing():
     assert any(not result.value for result in results)
     assert any(
         "activity_id" in message for result in results for message in result.msgs
+    )
+
+
+def test_required_global_attribute_rejects_whitespace_only_value():
+    check = Obs4Mips2_6_1Check()
+    dataset = dataset_with_all_attributes()
+    dataset._attributes["contact"] = "   "
+    check.setup(dataset)
+
+    results = check.check_global_attributes_present(dataset)
+
+    assert any(
+        "empty or whitespace-only: contact" in message
+        for result in results
+        for message in result.msgs
     )
 
 
@@ -150,6 +180,20 @@ def test_checker_reports_invalid_frequency_as_required_with_cv_guidance():
         "frequency='monthly' is not registered in CV 'frequency'. Before "
         "requesting a new term, check whether an existing CV term should be used. "
         "Similar registered terms: 'monPt', 'mon', 'monC'"
+    ]
+
+
+def test_checker_rejects_non_string_cv_value():
+    check = Obs4Mips2_6_1Check()
+    dataset = DatasetStub({"frequency": 1})
+    check.setup(dataset)
+
+    results = check.check_global_attribute_cv(dataset)
+
+    assert len(results) == 1
+    assert not results[0].value
+    assert results[0].msgs == [
+        "frequency=1 must be a string to be checked against CV 'frequency'"
     ]
 
 
@@ -518,24 +562,8 @@ def test_filename_enforces_cmip_time_precision(frequency, time_range, expected_d
     )
 
 
-def test_filename_requires_clim_suffix_for_climatology():
+def test_filename_uses_frequency_not_suffix_for_climatology():
     filename = "rlut_monC_CERES-EBAF-4-2_RSS_gn_200003-200004.nc"
-    dataset = DatasetStub(
-        ods_path_attributes(frequency="monC"),
-        {"time": TimeVariableStub([74, 105], climatology="climatology_bnds")},
-        f"/archive/{filename}",
-    )
-    check = Obs4Mips2_6_1Check()
-    check.setup(dataset)
-
-    result = check.check_filename(dataset)
-
-    assert not result.value
-    assert any("must end in '-clim'" in message for message in result.msgs)
-
-
-def test_filename_accepts_clim_suffix_for_climatology():
-    filename = "rlut_monC_CERES-EBAF-4-2_RSS_gn_200003-200004-clim.nc"
     dataset = DatasetStub(
         ods_path_attributes(frequency="monC"),
         {"time": TimeVariableStub([74, 105], climatology="climatology_bnds")},
@@ -549,7 +577,23 @@ def test_filename_accepts_clim_suffix_for_climatology():
     assert result.value, result.msgs
 
 
-def test_filename_rejects_clim_suffix_without_climatology():
+def test_filename_rejects_non_ods_clim_suffix_for_climatology():
+    filename = "rlut_monC_CERES-EBAF-4-2_RSS_gn_200003-200004-clim.nc"
+    dataset = DatasetStub(
+        ods_path_attributes(frequency="monC"),
+        {"time": TimeVariableStub([74, 105], climatology="climatology_bnds")},
+        f"/archive/{filename}",
+    )
+    check = Obs4Mips2_6_1Check()
+    check.setup(dataset)
+
+    result = check.check_filename(dataset)
+
+    assert not result.value
+    assert any("ordered, equally precise" in message for message in result.msgs)
+
+
+def test_filename_rejects_non_ods_clim_suffix_without_climatology():
     filename = "rlut_mon_CERES-EBAF-4-2_RSS_gn_200003-200004-clim.nc"
     dataset = DatasetStub(
         ods_path_attributes(),
@@ -562,7 +606,7 @@ def test_filename_rejects_clim_suffix_without_climatology():
     result = check.check_filename(dataset)
 
     assert not result.value
-    assert any("may end in '-clim' only" in message for message in result.msgs)
+    assert any("ordered, equally precise" in message for message in result.msgs)
 
 
 def test_directory_structure_matches_attributes_and_version():
