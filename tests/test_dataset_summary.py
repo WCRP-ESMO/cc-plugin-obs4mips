@@ -65,8 +65,35 @@ def test_summary_captures_header_without_data_values(tmp_path):
         "dataset_global_attributes_path": "/dataset/global_attributes",
         "terms": [
             {
+                "attribute": "Conventions",
+                "collection": "conventions",
+                "registered_content": False,
+                "submitted_value": "CF-1.12",
+                "value_field": "id",
+                "source": (
+                    "https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/"
+                    "f3a0079eca73d0a7e8a659fbf36c7a29e3ab9a72/conventions"
+                ),
+                "source_ref": "f3a0079eca73d0a7e8a659fbf36c7a29e3ab9a72",
+                "similar_registered_values": ["cf-1.11"],
+            },
+            {
+                "attribute": "Conventions",
+                "collection": "conventions",
+                "registered_content": False,
+                "submitted_value": "ODS-2.6.1",
+                "value_field": "id",
+                "source": (
+                    "https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/"
+                    "f3a0079eca73d0a7e8a659fbf36c7a29e3ab9a72/conventions"
+                ),
+                "source_ref": "f3a0079eca73d0a7e8a659fbf36c7a29e3ab9a72",
+                "similar_registered_values": ["ods-2.6", "ods-2.5"],
+            },
+            {
                 "attribute": "institution_id",
                 "collection": "institution_id",
+                "registered_content": True,
                 "submitted_value": "Example-Institute",
                 "value_field": "drs_name",
                 "source": (

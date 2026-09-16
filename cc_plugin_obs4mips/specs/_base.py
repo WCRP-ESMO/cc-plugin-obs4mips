@@ -27,8 +27,10 @@ class AttrSpec:
     ----------
     name : str
         The name of the global attribute.
-    level : int
-        The requirement level of the attribute (e.g., HIGH, MEDIUM, LOW).
+    requirement : int
+        The requirement level of the attribute (e.g., REQUIRED, RECOMMENDED, OPTIONAL).
+    rc : bool
+        Whether or not the attribute is registered content.
     required_if : Optional[Callable], optional
         A callable that determines if the attribute is required based on a condition.
     cv : Optional[str], optional
@@ -42,18 +44,22 @@ class AttrSpec:
     """
 
     name: str
-    level: int
-    required_if: Optional[Callable] = None
-    cv: Optional[str] = None
-    cv_strictness: str = "warn"
-    format_check: Optional[Callable[[str], bool]] = None
-    format_hint: str = ""
+    rc: bool
+    requirement: int
+    required_if: Optional[Callable]
+    cv: Optional[str]
+    cv_strictness: str
+    format_check: Optional[Callable[[str], bool]]
+    format_hint: str
 
     def __post_init__(self):
-        # Validate the level and cv_strictness immediately after initialization
-        if self.level not in _VALID_LEVELS:
+        # Validate registered-content, requirement, and CV configuration immediately.
+        if not isinstance(self.rc, bool):
+            raise TypeError(f"rc must be a boolean; got {self.rc!r}")
+        if self.requirement not in _VALID_LEVELS:
             raise ValueError(
-                f"level must be a Compliance Checker severity; got {self.level!r}"
+                "requirement must be a Compliance Checker severity "
+                f"({sorted(_VALID_LEVELS)!r}); got {self.requirement!r}"
             )
         if self.cv_strictness not in _VALID_CV_STRICTNESS:
             raise ValueError(

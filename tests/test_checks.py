@@ -112,7 +112,37 @@ def test_checker_uses_compliance_checker_base_api():
 @pytest.mark.parametrize("level", [0, 4])
 def test_attribute_spec_rejects_unknown_compliance_checker_level(level):
     with pytest.raises(ValueError, match="Compliance Checker severity"):
-        AttrSpec("example", level)
+        AttrSpec(
+            name="example",
+            rc=False,
+            requirement=level,
+            required_if=None,
+            cv=None,
+            cv_strictness="warn",
+            format_check=None,
+            format_hint="example attribute",
+        )
+
+
+def test_attribute_spec_requires_boolean_registered_content_flag():
+    with pytest.raises(TypeError, match="rc must be a boolean"):
+        AttrSpec(
+            name="example",
+            rc="yes",
+            requirement=BaseCheck.LOW,
+            required_if=None,
+            cv=None,
+            cv_strictness="warn",
+            format_check=None,
+            format_hint="example attribute",
+        )
+
+
+def test_global_attribute_specs_expose_registered_content_metadata():
+    assert spec_named("institution_id").rc is True
+    assert spec_named("source_id").rc is True
+    assert spec_named("variable_id").rc is True
+    assert spec_named("activity_id").rc is False
 
 
 def test_required_global_attributes_pass():
@@ -198,10 +228,10 @@ def test_checker_rejects_non_string_cv_value():
 
 
 def test_title_is_optional_but_encouraged_attributes_are_recommended():
-    assert spec_named("title").level == BaseCheck.LOW
-    assert spec_named("doi").level == BaseCheck.MEDIUM
-    assert spec_named("source_data_retrieval_date").level == BaseCheck.MEDIUM
-    assert spec_named("source_data_url").level == BaseCheck.MEDIUM
+    assert spec_named("title").requirement == BaseCheck.LOW
+    assert spec_named("doi").requirement == BaseCheck.MEDIUM
+    assert spec_named("source_data_retrieval_date").requirement == BaseCheck.MEDIUM
+    assert spec_named("source_data_url").requirement == BaseCheck.MEDIUM
 
     dataset = dataset_with_all_attributes()
     for name in ("title", "doi", "source_data_retrieval_date", "source_data_url"):

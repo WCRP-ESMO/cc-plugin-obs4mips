@@ -43,7 +43,7 @@ class Obs4MipsBaseCheck(BaseNCCheck, BaseCheck):
         results = []
         for spec in self.SPECS:
             applies = spec.required_if is None or spec.required_if(ds)
-            if not applies or spec.level not in (
+            if not applies or spec.requirement not in (
                 BaseCheck.HIGH,
                 BaseCheck.MEDIUM,
             ):
@@ -57,7 +57,7 @@ class Obs4MipsBaseCheck(BaseNCCheck, BaseCheck):
                     message = f"empty or whitespace-only: {spec.name}"
             results.append(
                 Result(
-                    spec.level,
+                    spec.requirement,
                     present,
                     "Required global attributes",
                     [] if present else [message],
@@ -75,7 +75,7 @@ class Obs4MipsBaseCheck(BaseNCCheck, BaseCheck):
             valid = isinstance(value, str) and spec.format_check(value)
             results.append(
                 Result(
-                    spec.level,
+                    spec.requirement,
                     valid,
                     "Global attribute formats",
                     [] if valid else [f"{spec.name}={value!r}: {spec.format_hint}"],
@@ -100,7 +100,7 @@ class Obs4MipsBaseCheck(BaseNCCheck, BaseCheck):
             values = (
                 value.split()
                 if isinstance(value, str)
-                and spec.name in {"activity_id", "realm", "region"}
+                and spec.name in {"Conventions", "activity_id", "realm", "region"}
                 else [value]
             )
             messages = []

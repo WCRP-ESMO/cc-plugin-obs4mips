@@ -90,7 +90,7 @@ def _cv_update_candidates(global_attributes: dict[str, Any]) -> dict[str, Any]:
         values = (
             submitted.split()
             if isinstance(submitted, str)
-            and spec.name in {"activity_id", "realm", "region"}
+            and spec.name in {"Conventions", "activity_id", "realm", "region"}
             else [submitted]
         )
         for value in values:
@@ -100,6 +100,7 @@ def _cv_update_candidates(global_attributes: dict[str, Any]) -> dict[str, Any]:
             candidate = {
                 "attribute": spec.name,
                 "collection": spec.cv,
+                "registered_content": spec.rc,
                 "submitted_value": value,
                 "value_field": metadata.get("value_field"),
                 "source": metadata.get("source"),
