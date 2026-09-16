@@ -26,6 +26,18 @@ To select the ODS release explicitly, use:
 compliance-checker -t obs4mips:2.6.1 [dataset.nc]
 ```
 
+When checking one primary file, supply directly related uncertainty or cell-measure NetCDF files with a repeatable companion option:
+
+```bash
+compliance-checker \
+  -t obs4mips:2.6.1 \
+  [dataset.nc] \
+  --companion-file [uncertainty.nc] \
+  --companion-file [cell-measure.nc]
+```
+
+Repeat `--companion-file FILE` to provide multiple files. The checker does not search the filesystem; it checks only the primary file and the companions supplied by the user. Use `json_new`, rather than `json`, when requesting JSON output for the resulting multi-file check.
+
 ## Issue submission artifacts
 
 Create a human-readable Compliance Checker report and a separate machine-readable JSON summary of the NetCDF header for attachment to an issue:

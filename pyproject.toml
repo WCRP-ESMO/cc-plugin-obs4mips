@@ -31,6 +31,9 @@ obs4mips-dataset-summary = "cc_plugin_obs4mips.dataset_summary:main"
 "obs4mips" = "cc_plugin_obs4mips.checks.ods_2_6_1:Obs4Mips2_6_1Check"
 "obs4mips:2.6.1" = "cc_plugin_obs4mips.checks.ods_2_6_1:Obs4Mips2_6_1Check"
 
+[project.entry-points."compliance_checker.generators"]
+"obs4mips-companion-file" = "cc_plugin_obs4mips.companion_file:Obs4MipsCompanionFileGenerator"
+
 [tool.setuptools.packages.find]
 include = ["cc_plugin_obs4mips*"]
 
