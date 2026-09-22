@@ -1,7 +1,11 @@
 """
-obs4MIPs ODS 2.6.1 global attribute specifications.
+ODS 2.6.1 global attribute specifications.
 
-Creates GLOBAL_ATTR_SPECS, which is a list of AttrSpec objects that store a name,
+Specifications are stored as AttrSpec objects, which stores the attribute name, data
+type, whether it is registered content (rc), if it's required/recommended/optional,
+any conditions that dictate requirement, the controlled vocabulary (cv) table name, how
+strict the cv adherence is, string formatting requirements, and a hint for the
+formatting requirements.
 """
 
 from __future__ import annotations
@@ -9,6 +13,8 @@ from __future__ import annotations
 import re
 from urllib.parse import urlsplit
 from uuid import UUID
+
+import numpy as np
 
 from cc_plugin_obs4mips.specs._base import (
     OPTIONAL,
@@ -50,6 +56,11 @@ def is_valid_tracking_id(v: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def is_email_in_parentheses(v: str) -> bool:
+    """Check for a valid email address inside parentheses somewhere in string."""
+    return bool(re.search(r"\([^\s()]+@[^\s()]+\.[^\s()]+\)", v))
 
 
 def is_conventions_string(v: str) -> bool:
@@ -137,46 +148,51 @@ def variant_is_not_be(ds) -> bool:
 GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     AttrSpec(
         name="activity_id",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv="activity_id",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/activity_id
         cv_strictness="error",
         format_check=None,
-        format_hint="must be 'obs4MIPs'",
+        format_hint="",
     ),
     AttrSpec(
         name="aux_uncertainty_id",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=has_aux_unc_true,
         cv="aux_uncertainty_id",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/aux_uncertainty_id
         cv_strictness="warn",
         format_check=None,
-        format_hint="must be one of the the controlled vocabulary",
+        format_hint="",
     ),
     AttrSpec(
         name="comment",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=OPTIONAL,
         required_if=None,
         cv=None,
         cv_strictness="warn",
         format_check=None,
-        format_hint="a character string containing additional information about the data or methods used to produce it",
+        format_hint="",
     ),
     AttrSpec(
         name="contact",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv=None,  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/contact
         cv_strictness="warn",
-        format_check=None,
-        format_hint="name and contact information, e.g., 'First Last (email@address.com)', of person who should be contacted for more information about the data",
+        format_check=is_email_in_parentheses,
+        format_hint="must contain email in parentheses; e.g., 'Firstname Lastname (email@address.org)'",
     ),
     AttrSpec(
         name="Conventions",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
@@ -187,6 +203,7 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="creation_date",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
@@ -197,16 +214,18 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="dataset_contributor",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv=None,  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/dataset_contributor
         cv_strictness="warn",
         format_check=None,
-        format_hint="name of the individual that prepared the ODS-compliant data, e.g., 'First Last'",
+        format_hint="",
     ),
     AttrSpec(
         name="data_specs_version",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
@@ -217,6 +236,7 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="doi",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=RECOMMENDED,
         required_if=None,
@@ -227,46 +247,51 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="external_variables",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=OPTIONAL,
         required_if=None,
         cv=None,
         cv_strictness="warn",
         format_check=None,
-        format_hint="must be one of the controlled vocabulary",
+        format_hint="",
     ),
     AttrSpec(
         name="frequency",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv="frequency",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/frequency
         cv_strictness="error",
         format_check=None,
-        format_hint="must be one of the controlled vocabulary",
+        format_hint="",
     ),
     AttrSpec(
         name="grid",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv=None,
         cv_strictness="warn",
         format_check=None,
-        format_hint="describe the horizontal grid and re-gridding procedure, e.g., 'data re-gridded to a CMIP6 standard 1x1 degree latxlon grid from the native T63 grid using an area-average preserving method'",
+        format_hint="",
     ),
     AttrSpec(
         name="grid_label",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv="grid_label",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/grid_label
         cv_strictness="error",
         format_check=None,
-        format_hint="must be one of the controlled vocabulary",
+        format_hint="",
     ),
     AttrSpec(
         name="has_aux_unc",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
@@ -277,46 +302,51 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="history",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=OPTIONAL,
         required_if=None,
         cv=None,
         cv_strictness="warn",
         format_check=None,
-        format_hint="a character string containing an audit trail for modifications to the original data where each modification is typically preceded by a 'timestamp'",
+        format_hint="",
     ),
     AttrSpec(
         name="institution",
+        dtype=np.dtype("str"),
         rc=True,
         requirement=REQUIRED,
         required_if=None,
         cv="institution",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/institution_id; the "description" keys in the JSONs
         cv_strictness="warn",
         format_check=None,
-        format_hint="name of the institution, city, state abbreviation, country abbreviation, e.g., 'National Oceanic and Atmospheric Administration, Silver Spring, Maryland, USA'",
+        format_hint="",
     ),
     AttrSpec(
         name="institution_id",
+        dtype=np.dtype("str"),
         rc=True,
         requirement=REQUIRED,
         required_if=None,
         cv="institution_id",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/institution_id
         cv_strictness="warn",
         format_check=None,  # Can only contain a-z, A-Z, 0-9, and -
-        format_hint="abbreviated identifier for the institution, e.g., 'NOAA'",
+        format_hint="",
     ),
     AttrSpec(
         name="license",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv="license",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/license
         cv_strictness="error",
         format_check=None,
-        format_hint="a description of the data license, preferrably a CC license, e.g., 'Data in this file produced by <Your Centre Name> is licensed under a Creative Commons Attribution-4.0 International (CC BY 4.0) License (https://creativecommons.org/licenses/). Use of the data must be acknowledged following guidelines found at <a URL maintained by you>. Further information about this data, including some limitations, can be found via <some URL maintained by you>",
+        format_hint="",
     ),
     AttrSpec(
         name="nominal_resolution",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
@@ -327,6 +357,7 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="processing_code_location",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
@@ -337,26 +368,29 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="product",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv="product",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/product
         cv_strictness="error",
         format_check=None,
-        format_hint="must be one of the controlled vocabulary",
+        format_hint="",
     ),
     AttrSpec(
         name="realm",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv="realm",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/realm
         cv_strictness="error",
         format_check=None,
-        format_hint="must be one of the controlled vocabulary",
+        format_hint="",
     ),
     AttrSpec(
         name="references",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
@@ -367,46 +401,51 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="region",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv="region",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/region
         cv_strictness="error",
         format_check=None,
-        format_hint="must be one of the controlled vocabulary",
+        format_hint="",
     ),
     AttrSpec(
         name="site_id",
+        dtype=np.dtype("str"),
         rc=False,  # I believe this should be registered content, but in ODS, it is not
         requirement=REQUIRED,
         required_if=grid_is_site,
         cv="site_id",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/site_id
         cv_strictness="warn",
         format_check=None,
-        format_hint="name for the in-situ measurement location if individual site, or 'collection' if multiple sites",
+        format_hint="",
     ),
     AttrSpec(
         name="site_location",
+        dtype=np.dtype("str"),
         rc=False,  # Should also be RC and a description associated with site_id?
         requirement=REQUIRED,
         required_if=grid_is_site,  # no CV unless more than one point, then it should be 'collection'
         cv="site_location",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/site_location
         cv_strictness="warn",
         format_check=None,
-        format_hint="must be one of the controlled vocabulary",
+        format_hint="",
     ),
     AttrSpec(
         name="source",
+        dtype=np.dtype("str"),
         rc=True,
         requirement=REQUIRED,
         required_if=None,
         cv="source",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/source_id; the "description" keys in the jsons
         cv_strictness="warn",
         format_check=None,
-        format_hint="the unabbreviated name of the dataset and the version",
+        format_hint="",
     ),
     AttrSpec(
         name="source_id",
+        dtype=np.dtype("str"),
         rc=True,
         requirement=REQUIRED,
         required_if=None,
@@ -417,36 +456,40 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="source_label",
+        dtype=np.dtype("str"),
         rc=True,
         requirement=REQUIRED,
         required_if=None,
         cv=None,  # Currently missing this in https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/source_id
         cv_strictness="warn",
         format_check=None,
-        format_hint="the abbreviated dataset name",
+        format_hint="",
     ),
     AttrSpec(
         name="source_version_number",
+        dtype=np.dtype("str"),
         rc=True,
         requirement=REQUIRED,
         required_if=None,
         cv="source_version_number",  # Currently missing this in https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/source_id
         cv_strictness="warn",
         format_check=None,
-        format_hint="the version number of the dataset",
+        format_hint="",
     ),
     AttrSpec(
         name="source_data_notes",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=OPTIONAL,
         required_if=None,
         cv=None,
         cv_strictness="warn",
         format_check=None,
-        format_hint="any additional notes on the accessibility of the source data",
+        format_hint="",
     ),
     AttrSpec(
         name="source_data_retrieval_date",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=RECOMMENDED,
         required_if=None,
@@ -457,6 +500,7 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="source_data_url",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=RECOMMENDED,
         required_if=None,
@@ -467,26 +511,29 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="source_type",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv="source_type",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/source_type
         cv_strictness="error",
         format_check=None,
-        format_hint="must be one of the controlled vocabularies",
+        format_hint="",
     ),
     AttrSpec(
         name="title",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=OPTIONAL,
         required_if=None,
         cv=None,
         cv_strictness="warn",
         format_check=None,
-        format_hint="a general description of the dataset/variable that might include the institution_id and/or the variant; often used as a human-readable title above a map of the data",
+        format_hint="",
     ),
     AttrSpec(
         name="tracking_id",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
@@ -497,32 +544,35 @@ GLOBAL_ATTR_SPECS: list[AttrSpec] = [
     ),
     AttrSpec(
         name="variable_id",
+        dtype=np.dtype("str"),
         rc=True,
         requirement=REQUIRED,
         required_if=None,
         cv="variable_id",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/variable_id
         cv_strictness="warn",
         format_check=None,
-        format_hint="a unique identifier associated with the dataset's variable",
+        format_hint="",
     ),
     AttrSpec(
         name="variant_info",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=RECOMMENDED,
         required_if=variant_is_not_be,
         cv=None,
         cv_strictness="warn",
         format_check=None,
-        format_hint="a description of who prepared the variant and a description of the variant itself",
+        format_hint="",
     ),
     AttrSpec(
         name="variant_label",
+        dtype=np.dtype("str"),
         rc=False,
         requirement=REQUIRED,
         required_if=None,
         cv="variant_label",  # https://github.com/WCRP-ESMO/obs4MIPs_CVs/tree/main/variant_label
         cv_strictness="warn",
         format_check=None,  # the second half of variant_label, e.g., for RSS-BE, only BE is in the CV; for RSS-r1, only "r" is in the CV
-        format_hint="the institution_id + variant_label CV + number if variant_label is 'r'; used when, e.g., an institution has multiple methods for estimating one variable_id",
+        format_hint="",
     ),
 ]

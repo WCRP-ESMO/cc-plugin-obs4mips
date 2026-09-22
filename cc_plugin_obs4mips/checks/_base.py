@@ -1,5 +1,5 @@
 """
-Check methods that can be used in all ODS versions.
+Check methods that should be used in all ODS versions.
 
 Checks include:
 - Check that all CV tables expected by the specification are available
@@ -91,9 +91,7 @@ class Obs4MipsBaseCheck(BaseNCCheck, BaseCheck):
                 continue
             value = getattr(ds, spec.name)
             weight = (
-                BaseCheck.HIGH
-                if spec.cv_strictness == "error"
-                else BaseCheck.MEDIUM
+                BaseCheck.HIGH if spec.cv_strictness == "error" else BaseCheck.MEDIUM
             )
             if not CV.is_loaded(self.CV_VERSION, spec.cv):
                 continue

@@ -8,6 +8,7 @@ NetCDFs against the specifications.
 from dataclasses import dataclass, replace
 from typing import Callable, Iterable, Mapping, Optional
 
+import numpy as np
 from compliance_checker.base import BaseCheck
 
 # ODS requirement names mapped to Compliance Checker's supported severity levels.
@@ -27,6 +28,8 @@ class AttrSpec:
     ----------
     name : str
         The name of the global attribute.
+    dtype : np.dtype
+        Numpy dtype object indicating what the expected data type of the attribute's value should be.
     requirement : int
         The requirement level of the attribute (e.g., REQUIRED, RECOMMENDED, OPTIONAL).
     rc : bool
@@ -44,6 +47,7 @@ class AttrSpec:
     """
 
     name: str
+    dtype: np.dtype
     rc: bool
     requirement: int
     required_if: Optional[Callable]

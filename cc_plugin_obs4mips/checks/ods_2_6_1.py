@@ -1,6 +1,9 @@
 """
-ODS 2.6.1 checks include:
-- Any checks already in the base class (see Obs4MipsBaseCheck in _base.py)
+ODS 2.6.1 logical checks.
+
+Any validation that is more complex than those handled by ``specs/ods_2_6_1.py``. Checks
+might include relationships between attributes, checking the contents of the NetCDF
+itself, checking file naming structures, etc.
 """
 
 import os
@@ -21,6 +24,12 @@ from cc_plugin_obs4mips.specs.ods_2_6_1 import (
     is_processing_code_location,
 )
 
+_EXTERNAL_VARIABLES = (
+    "areacella",
+    "areacello",
+    "volcella",
+    "volcello",
+)
 _FILENAME_COMPONENTS = (
     "variable_id",
     "frequency",
@@ -314,6 +323,58 @@ class Obs4Mips2_6_1Check(Obs4MipsBaseCheck):
                 provided_message + "".join(f"\n  - {problem}" for problem in problems),
             ],
         )
+
+    def check_aux_uncertainty_id(self, ds, companion_files=None):
+        """
+        Logic checks for aux_uncertainty_id attribute.
+
+        - Space-delimited string of uncertainty_modifier (modifiers must be from CVs)
+            - Create list of uncertainty variable ids that look like {variable_id}{uncertainty_modifier}
+        - If uncertainty variable(s) exist in ds
+            - If companion files not provided
+                - Raise an error and request adding companion file(s), one for each uncertainty variable id in list
+        - If uncertainty variable(s) don't exist and companion files provided
+            - If more than one uncertainty variable ids in list, there should be equal number of provided companion files
+                - Check that variable_id in companion file is one of uncertainty variable ids
+        - Once all of the above has passed, we should check that the {variable_id} has ancillary_variables = "{variable_id}{uncertainty_modifier} {variable_id}{uncertainty_modifier2} etc"
+        """
+
+    def check_conventions(self, ds):
+        """
+        Logic checks for Conventions attribute.
+
+        - Extract list of convention strings from space-separated string
+            - At least 'ODS-2.6.1' must be present in list
+            - Any other convention besides 'ODS-2.6.1' must be one from the CVs
+            - If 'CF-' inlcuded in list of conventions
+                - There must only be one CF convention listed, can't have more than one
+                - Match the string to a compliance-checker -t option (would require being able to map the CVs to the corresponding compliance-checker options)
+                    - If the CF convention does not match a compliance-checker -t option, raise an error
+                    - If it matches one, ensure that the user actually used the -t flag
+                        - If not, raise error and tell them to re-run with the additional -t and CF convention option
+                        - If the user re-runs with the correct -t flag and CF convention option, the check should pass
+        """
+
+    def check_external_variables(self, ds):
+        """
+        Logic checks for external variables attribute.
+
+        - If present, warn the user not to use
+            - Recommend including bounds with any time, latitude, longitude, depth dimensions
+                - Example:
+                    ```
+                    double time(time) ;
+                            time:axis = "T" ;
+                            time:standard_name = "time" ;
+                            time:long_name = "time" ;
+                            time:bounds = "time_bnds" ;
+                            time:units = "days since 2003-01-01" ;
+                            time:calendar = "standard" ;
+                    double time_bnds(time, bnds) ;
+                    ```
+        - Extract list of external variables from space-separated string
+            - Must be one of _EXTERNAL_VARIABLES
+        """
 
     def check_source_id_matches_label_and_version(self, ds):
         """Check source_id against source_label and source_version_number."""
