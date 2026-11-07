@@ -1,123 +1,53 @@
 import json
-from pathlib import Path
 
 import pytest
 
-from scripts.sync_cvs import SyncError, read_table, sync
+from scripts.sync_cvs import build_bundle, read_table
+
+ATTRIBUTE = {
+    "description": "x", "dtype": "string", "separator": None, "requirement": "required",
+    "conditional": None, "cv": {"table": "frequency", "key": "drs_name"}, "rc": "no",
+    "introduced": "2.6", "notes": None,
+}  # fmt: skip
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+def write_term(root, table, name, **fields):
+    (root / table).mkdir(exist_ok=True)
+    (root / table / f"{name}.json").write_text(json.dumps({"id": name, "type": table, **fields}))
 
 
-def write_term(root: Path, name: str, **overrides):
-    term = {
-        "id": name,
-        "type": "frequency",
-        "drs_name": name,
-        **overrides,
-    }
-    table_root = root / "frequency"
-    table_root.mkdir(parents=True, exist_ok=True)
-    (table_root / f"{name}.json").write_text(json.dumps(term), encoding="utf-8")
+def test_read_table_splits_values_and_patterns(tmp_path):
+    write_term(tmp_path, "frequency", "mon", drs_name="mon")
+    write_term(tmp_path, "frequency", "day", drs_name="day")
+    write_term(tmp_path, "frequency", "stub", drs_name="")  # empty stubs are skipped
+    write_term(tmp_path, "frequency", "site", regex="site-.*")
+    assert read_table(tmp_path, "frequency", "drs_name") == {"allowed": ["day", "mon"], "patterns": ["site-.*"]}
 
 
-def write_config(path: Path):
-    config = {
-        "schema_version": 1,
-        "versions": {
-            "2.6.1": {
-                "repository": "https://github.com/WCRP-ESMO/obs4MIPs_CVs",
-                "ref": "abc123",
-                "tables": {"frequency": {"value_field": "drs_name"}},
-            }
-        },
-    }
-    path.write_text(json.dumps(config), encoding="utf-8")
+def test_read_table_without_key_has_no_allowed_values(tmp_path):
+    write_term(tmp_path, "contact", "freetext")
+    assert read_table(tmp_path, "contact", None) == {}
 
 
-def test_read_table_extracts_sorted_drs_names(tmp_path):
-    write_term(tmp_path, "mon")
-    write_term(tmp_path, "1hrPt", id="1hrpt")
-
-    assert read_table(tmp_path, "frequency", "drs_name") == ["1hrPt", "mon"]
-
-
-@pytest.mark.parametrize(
-    ("overrides", "message"),
-    [
-        ({"type": "grid_label"}, "expected one of.*frequency"),
-        ({"drs_name": ""}, "no non-empty string 'drs_name'"),
-    ],
-)
-def test_read_table_rejects_malformed_terms(tmp_path, overrides, message):
-    write_term(tmp_path, "mon", **overrides)
-
-    with pytest.raises(SyncError, match=message):
-        read_table(tmp_path, "frequency", "drs_name")
-
-
-def test_read_table_supports_fallback_fields_and_legacy_types(tmp_path):
-    write_term(tmp_path, "metno", type="organisation", drs_name="")
-
-    assert read_table(
-        tmp_path,
-        "frequency",
-        "drs_name",
-        fallback_field="id",
-        term_types=["frequency", "organisation"],
-    ) == ["metno"]
-
-
-def test_sync_writes_snapshot_and_check_detects_drift(tmp_path):
-    source_root = tmp_path / "source"
-    output_root = tmp_path / "output"
-    config_path = tmp_path / "sources.json"
-    write_term(source_root, "mon")
-    write_config(config_path)
-
-    changed = sync(
-        ods_version="2.6.1",
-        config_path=config_path,
-        output_root=output_root,
-        source_root=source_root,
-        source_ref_override=None,
-        selected_tables=None,
-        check=False,
+def test_build_bundle(tmp_path):
+    write_term(tmp_path, "frequency", "mon", drs_name="mon")
+    (tmp_path / "global_attributes.json").write_text(
+        json.dumps({"ods_version": "2.6", "global_attributes": {"frequency": ATTRIBUTE, "grid": {**ATTRIBUTE, "cv": None}}})
     )
-    snapshot = output_root / "2.6.1" / "frequency.json"
-    assert changed == [snapshot]
-    assert json.loads(snapshot.read_text())["values"] == ["mon"]
-
-    assert (
-        sync(
-            ods_version="2.6.1",
-            config_path=config_path,
-            output_root=output_root,
-            source_root=source_root,
-            source_ref_override=None,
-            selected_tables=None,
-            check=True,
-        )
-        == []
+    (tmp_path / "drs_specs.yaml").write_text(
+        "directory: {separator: /, parts: [{source_collection: frequency, is_required: true}]}\n"
+        "file_name: {separator: _, properties: {extension: nc}, parts: [{source_collection: frequency, is_required: true}]}\n"
+        "dataset_id: {separator: ., parts: [{source_collection: frequency, is_required: true}]}\n"
     )
-
-    write_term(source_root, "day")
-    assert sync(
-        ods_version="2.6.1",
-        config_path=config_path,
-        output_root=output_root,
-        source_root=source_root,
-        source_ref_override=None,
-        selected_tables=None,
-        check=True,
-    ) == [snapshot]
+    bundle = build_bundle(tmp_path, "abc123")
+    assert bundle["cvs_ref"] == "abc123" and bundle["ods_version"] == "2.6"
+    assert bundle["attributes"]["frequency"]["allowed"] == ["mon"]
+    assert "allowed" not in bundle["attributes"]["grid"]
+    assert bundle["drs"]["file_name"] == {
+        "separator": "_", "parts": [{"name": "frequency", "required": True}], "extension": "nc",
+    }  # fmt: skip
 
 
-def test_every_configured_cv_snapshot_is_packaged():
-    config = json.loads((REPOSITORY_ROOT / "cv_sources.json").read_text())
-    configured = set(config["versions"]["2.6.1"]["tables"])
-    snapshot_root = REPOSITORY_ROOT / "cc_plugin_obs4mips" / "cv_data" / "2.6.1"
-    packaged = {path.stem for path in snapshot_root.glob("*.json")}
-
-    assert len(configured) == 24
-    assert packaged == configured
+def test_missing_collection_is_an_error(tmp_path):
+    with pytest.raises(SystemExit):
+        read_table(tmp_path, "nope", "drs_name")
