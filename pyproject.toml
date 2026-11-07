@@ -28,8 +28,8 @@ urls.repository = "https://github.com/WCRP-ESMO/cc-plugin-obs4mips"
 obs4mips-dataset-summary = "cc_plugin_obs4mips.dataset_summary:main"
 
 [project.entry-points."compliance_checker.suites"]
-"obs4mips" = "cc_plugin_obs4mips.checks.ods_2_6_1:Obs4Mips2_6_1Check"
-"obs4mips:2.6.1" = "cc_plugin_obs4mips.checks.ods_2_6_1:Obs4Mips2_6_1Check"
+"obs4mips" = "cc_plugin_obs4mips.checks:Obs4MipsCheck"
+"obs4mips:2.6" = "cc_plugin_obs4mips.checks:Obs4MipsCheck"
 
 [project.entry-points."compliance_checker.generators"]
 "obs4mips-companion-file" = "cc_plugin_obs4mips.companion_file:Obs4MipsCompanionFileGenerator"
@@ -38,7 +38,7 @@ obs4mips-dataset-summary = "cc_plugin_obs4mips.dataset_summary:main"
 include = ["cc_plugin_obs4mips*"]
 
 [tool.setuptools.package-data]
-cc_plugin_obs4mips = ["cv_data/**/*.json"]
+cc_plugin_obs4mips = ["cv_data/*.json"]
 
 [tool.setuptools_scm]
 version_file = "cc_plugin_obs4mips/_version.py"
@@ -51,5 +51,6 @@ fallback_version = "0.0.0"
 dev = [
     "pytest",
     "pytest-cov",
+    "pyyaml",  # scripts/sync_cvs.py only
     "ruff",
 ]

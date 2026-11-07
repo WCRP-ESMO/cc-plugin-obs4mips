@@ -12,13 +12,13 @@ import numpy as np
 from netCDF4 import Dataset
 
 from cc_plugin_obs4mips import __version__
-from cc_plugin_obs4mips.cv import CV
-from cc_plugin_obs4mips.specs.ods_2_6_1 import GLOBAL_ATTR_SPECS
+from cc_plugin_obs4mips.checks import unregistered_terms
+from cc_plugin_obs4mips.specs import BUNDLE
 
 
 SUMMARY_SCHEMA = "obs4mips-dataset-summary"
 SUMMARY_SCHEMA_VERSION = "1.0.0"
-ODS_VERSION = "2.6.1"
+ODS_VERSION = BUNDLE["ods_version"]
 
 
 def _json_value(value: Any) -> Any:
@@ -79,38 +79,22 @@ def _variable_summary(variable: Any) -> dict[str, Any]:
 def _cv_update_candidates(global_attributes: dict[str, Any]) -> dict[str, Any]:
     """Describe unregistered CV values for review and later automation."""
     terms = []
-    for spec in GLOBAL_ATTR_SPECS:
-        if (
-            spec.cv is None
-            or spec.name not in global_attributes
-            or not CV.is_loaded(ODS_VERSION, spec.cv)
-        ):
+    for name, value in global_attributes.items():
+        attr = BUNDLE["attributes"].get(name)
+        if not attr or not isinstance(value, str) or not ("allowed" in attr or "patterns" in attr):
             continue
-        submitted = global_attributes[spec.name]
-        values = (
-            submitted.split()
-            if isinstance(submitted, str)
-            and spec.name in {"Conventions", "activity_id", "realm", "region"}
-            else [submitted]
-        )
-        for value in values:
-            if not isinstance(value, str) or CV.contains(ODS_VERSION, spec.cv, value):
-                continue
-            metadata = CV.metadata(ODS_VERSION, spec.cv)
+        for token, similar in unregistered_terms(name, value):
             candidate = {
-                "attribute": spec.name,
-                "collection": spec.cv,
-                "registered_content": spec.rc,
-                "submitted_value": value,
-                "value_field": metadata.get("value_field"),
-                "source": metadata.get("source"),
-                "source_ref": metadata.get("source_ref"),
-                "similar_registered_values": CV.suggestions(
-                    ODS_VERSION, spec.cv, value
-                ),
+                "attribute": name,
+                "collection": attr["cv"]["table"],
+                "registered_content": attr["rc"] == "yes",
+                "submitted_value": token,
+                "value_field": attr["cv"]["key"],
+                "source_ref": BUNDLE["cvs_ref"],
+                "similar_registered_values": similar,
             }
-            if spec.name == "variable_id":
-                candidate["variable_metadata_path"] = f"/dataset/variables/{value}"
+            if name == "variable_id":
+                candidate["variable_metadata_path"] = f"/dataset/variables/{token}"
             terms.append(candidate)
 
     return {

@@ -23,14 +23,14 @@ Replace `[dataset.nc]` with the path to your NetCDF dataset. The tool will outpu
 To select the ODS release explicitly, use:
 
 ```bash
-compliance-checker -t obs4mips:2.6.1 [dataset.nc]
+compliance-checker -t obs4mips [dataset.nc]
 ```
 
 When checking one primary file, supply directly related uncertainty or cell-measure NetCDF files with a repeatable companion option:
 
 ```bash
 compliance-checker \
-  -t obs4mips:2.6.1 \
+  -t obs4mips \
   [dataset.nc] \
   --companion-file [uncertainty.nc] \
   --companion-file [cell-measure.nc]
@@ -44,7 +44,7 @@ Create a human-readable Compliance Checker report and a separate machine-readabl
 
 ```bash
 compliance-checker \
-  -t obs4mips:2.6.1 \
+  -t obs4mips \
   -f text \
   -o compliance-report.txt \
   [dataset.nc]
@@ -58,24 +58,36 @@ The dataset summary is a parseable equivalent of `ncdump -h`. It includes the fi
 
 When a submitted value is not registered in a packaged controlled vocabulary, the text report asks the submitter to check for an appropriate existing term and shows similar registered values. The JSON summary records the same values under `cv_update_candidates`, along with the target collection, membership field, pinned CV source, and pointers to the dataset metadata needed by an automated CV repository updater.
 
-## Controlled vocabularies
+## Where the rules live
 
-Controlled-vocabulary snapshots used at runtime are stored under `cc_plugin_obs4mips/cv_data/<version>/`. The ODS 2.6.1 snapshots contain every collection in the official [`WCRP-ESMO/obs4MIPs_CVs`](https://github.com/WCRP-ESMO/obs4MIPs_CVs) repository. Each snapshot records its upstream commit and the field used for membership checks, so validation remains reproducible even while the upstream vocabulary evolves.
+The Obs4MIPs Data Specifications (ODS) are maintained in the [`WCRP-ESMO/obs4MIPs_CVs`](https://github.com/WCRP-ESMO/obs4MIPs_CVs) repository, not here. This plugin reads them from one generated file, `cc_plugin_obs4mips/cv_data/obs4mips.json`, which contains:
 
-The snapshots are generated files; do not edit them manually. Source repositories, pinned revisions, and table mappings are declared in `cv_sources.json`. To update all configured tables after deliberately changing a pinned revision, run:
+- every global attribute with its requirement level, condition, separator and allowed values or patterns (from `global_attributes.json` and the CV directories)
+- the file name and directory templates (from `drs_specs.yaml`)
+- the CVs commit it was built from (`cvs_ref`)
 
-```bash
-python scripts/sync_cvs.py --ods-version 2.6.1
-```
+| To change... | Edit |
+|---|---|
+| an attribute, requirement level, allowed value or DRS part | the CVs repo, then re-sync (below) |
+| a format a regex cannot express (UUID, DOI, URL), or whether a CV mismatch is an error or a warning | `cc_plugin_obs4mips/specs.py` |
+| how a check works (file name, directory, site attributes, ...) | `cc_plugin_obs4mips/checks.py` |
 
-The command downloads that exact revision, validates each upstream term, extracts the configured value field, and writes a deterministic package snapshot. To use an existing checkout without network access, pass `--source /path/to/obs4MIPs_CVs`.
+`obs4mips.json` is generated; do not edit it by hand.
 
-CI and local verification can detect an out-of-date generated snapshot without changing files:
+### Updating for new CVs or a new ODS release
 
-```bash
-python scripts/sync_cvs.py --ods-version 2.6.1 --check
-```
+1. Merge the change in the CVs repo.
+2. Set `ref` in `cv_sources.json` to the new commit.
+3. Run `uv run python scripts/sync_cvs.py` (add `--source /path/to/obs4MIPs_CVs` to use a local checkout).
+4. Run `uv run pytest -q` and commit the regenerated `obs4mips.json`.
 
-## Checks vs Specs
+CI runs `python scripts/sync_cvs.py --check`, which fails if `obs4mips.json` does not match the pinned commit.
 
-In the `cc_plugin_obs4mips` directory, you will see a `specs` subdirectory and a `checks` subdirectory. The `specs` directory contains a base class in `_base.py` called `AttrSpec`. This custom class is used to store the specifications for each global attribute, including its name, requirement level, controlled vocabulary, and format checks. Also in the `specs` directory are the version-specific specification files, such as `ods_2_6_1.py`, which contains a list called `GLOBAL_ATTR_SPECS` that defines the specifications for all global attributes in that ODS version.
+### Code layout
+
+- `checks.py`: one checker class. `check_global_attributes_present` and `check_global_attribute_values` loop over the bundle; `check_filename` and `check_directory_structure` build their templates from the DRS in the bundle. The remaining checks need the file itself or several attributes at once.
+- `specs.py`: loads the bundle and holds the few ODS facts the CVs cannot express.
+- `scripts/sync_cvs.py`: builds the bundle.
+- `tests/conftest.py`: `GOOD_VALUES` describes a valid file; tests change one value and check the report.
+
+Companion-file checks (`aux_uncertainty_id`, `external_variables`) are not implemented yet; the design notes are in `docs/planning/companion_files.md`. Plans for CVs versioning and update notifications are in `docs/planning/cvs_caching.md`.
