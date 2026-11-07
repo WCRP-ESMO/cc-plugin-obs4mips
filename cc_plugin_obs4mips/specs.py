@@ -10,11 +10,9 @@ What is left here are the things the CVs cannot express. If you are about to add
 ODS fact to this file, check first whether it belongs in the CVs repo instead.
 
 Sections:
-  BUNDLE              the generated CV data (read only)
-  CV_STRICTNESS       tool policy: which CV mismatches are errors rather than warnings
-  FORMAT_CHECKS       formats a regex or a CV list cannot express
-  FREQUENCY_TIME_DIGITS, VERSION_REGEX, FORBIDDEN_ID_CHARS
-                      small ODS facts that have no home in the CVs yet
+- Load the CV data bundle from the obs4MIPs_CVs repository
+- Define more complex format checks that aren't covered by the CVs repository
+- Define small ODS facts that have no home in the CVs
 """
 
 import json
@@ -23,22 +21,15 @@ from importlib.resources import files
 from urllib.parse import urlsplit
 from uuid import UUID
 
+# Load the CV data bundle generated from the obs4MIPs_CVs repository
 BUNDLE = json.loads(
-    files("cc_plugin_obs4mips").joinpath("cv_data/obs4mips.json").read_text(encoding="utf-8")
+    files("cc_plugin_obs4mips")
+    .joinpath("cv_data/obs4mips.json")
+    .read_text(encoding="utf-8")
 )
 
-# A CV mismatch for these attributes is an error (high weight). Any other CV mismatch is
-# a warning (medium weight). This is a policy of this tool, not an ODS rule.
-CV_STRICTNESS = {
-    "activity_id",
-    "frequency",
-    "grid_label",
-    "has_aux_unc",
-    "product",
-    "realm",
-    "region",
-    "source_type",
-}
+
+# Format check helper functions --------------------------------------------------------
 
 
 def _is_url(value):
@@ -54,8 +45,10 @@ def _is_uuid(value):
     return True
 
 
+# Format checks not covered by CVs -----------------------------------------------------
+
+
 # attribute name -> (function(token) -> bool, hint shown on failure).
-# The function is called on each space-separated token if the attribute has a separator.
 FORMAT_CHECKS = {
     "contact": (
         lambda v: bool(re.search(r"\([^\s()]+@[^\s()]+\.[^\s()]+\)", v)),
@@ -87,9 +80,7 @@ FREQUENCY_TIME_DIGITS = {
 VERSION_REGEX = r"v\d{8}"
 
 # ODS recommends processing scripts live in the obs4MIPs repo, pinned to a revision
-PROCESSING_CODE_REGEX = (
-    r"https://github\.com/WCRP-ESMO/obs4MIPs/(blob|tree)/[0-9a-fA-F]{7,40}/examples(/.*)?"
-)
+PROCESSING_CODE_REGEX = r"https://github\.com/WCRP-ESMO/obs4MIPs/(blob|tree)/[0-9a-fA-F]{7,40}/examples(/.*)?"
 
 # Characters that source_label + source_version_number may not keep in source_id
 FORBIDDEN_ID_CHARS = re.compile(r"[._() :/]")

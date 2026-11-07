@@ -2,7 +2,7 @@ import pytest
 from compliance_checker.base import BaseCheck
 
 from cc_plugin_obs4mips.checks import ATTRS, DRS, Obs4MipsCheck, condition_holds
-from cc_plugin_obs4mips.specs import BUNDLE, CV_STRICTNESS, FORMAT_CHECKS, FREQUENCY_TIME_DIGITS
+from cc_plugin_obs4mips.specs import BUNDLE, FORMAT_CHECKS, FREQUENCY_TIME_DIGITS
 from tests.conftest import GOOD_VALUES, failed, messages
 
 CHECK_METHODS = [m for m in dir(Obs4MipsCheck) if m.startswith("check_")]
@@ -27,7 +27,6 @@ def test_good_values_cover_the_bundle():
 
 def test_specs_only_name_bundle_attributes():
     assert set(FORMAT_CHECKS) <= set(ATTRS)
-    assert CV_STRICTNESS <= {n for n, a in ATTRS.items() if "allowed" in a or "patterns" in a}
     assert set(FREQUENCY_TIME_DIGITS) <= set(ATTRS["frequency"]["allowed"])
 
 
@@ -99,9 +98,9 @@ def test_condition_grammar():
 # --------------------------------------------------------------------------------------
 
 
-def test_unregistered_value_is_error_for_strict_attribute(run_check):
+def test_unregistered_value_is_a_warning(run_check):
     results = failed(run_check("check_global_attribute_values", frequency="mons"))
-    assert [r.weight for r in results] == [HIGH]
+    assert [r.weight for r in results] == [MEDIUM]
     assert "'mon'" in messages(results)  # suggestion
 
 
@@ -178,6 +177,36 @@ def test_filename_problems(run_check, filename, expected):
     assert expected in messages(run_check("check_filename", filename=filename))
 
 
+@pytest.mark.parametrize("time_name", ["TIME", "t"])
+def test_time_variable_may_have_any_name(run_check, time_name):
+    # found by its units, so the span mismatch is still caught
+    bad = "tas_mon_20CR-V3_BE_gn_200001-200003.nc"
+    assert "time coordinate span" in messages(run_check("check_filename", filename=bad, time_name=time_name))
+    assert not failed(run_check("check_filename", time_name=time_name))
+
+
+def test_time_axis_prefers_cf_declared_variable(run_check, tmp_path):
+    # an extra variable with "days since" units named so it sorts first must not be picked
+    from netCDF4 import Dataset
+
+    from cc_plugin_obs4mips.checks import Obs4MipsCheck
+
+    path = tmp_path / "x.nc"
+    with Dataset(path, "w") as ds:
+        ds.createDimension("time", 2)
+        for name, std in (("a_other", None), ("time", "time")):
+            v = ds.createVariable(name, "f8", ("time",))
+            v.units = "days since 2000-01-01"
+            if std:
+                v.standard_name = std
+        ds["a_other"][:] = [1000.0, 2000.0]
+        ds["time"][:] = [15.0, 45.0]
+    with Dataset(path) as ds:
+        checker = Obs4MipsCheck()
+        checker.setup(ds)
+        assert checker._check_time_range(ds, "200001-200002") == []
+
+
 def test_fx_must_omit_time_range(run_check):
     results = run_check("check_filename", frequency="fx", filename="tas_fx_20CR-V3_BE_gn_200001-200002.nc")
     assert "fx" in messages(results)
@@ -209,9 +238,13 @@ def test_directory_problems(run_check, directory, expected):
     assert expected in messages(run_check("check_directory_structure", directory=directory))
 
 
-def test_directory_uses_first_activity_id(run_check):
-    results = run_check("check_directory_structure", activity_id="obs4MIPs CMIP7")
-    assert not failed(results)
+def test_drs_values_must_be_single_values(run_check):
+    # activity_id is the one DRS part the CVs list as space-separated; as a DRS part it may not be
+    results = run_check("check_global_attribute_values", activity_id="obs4MIPs CMIP7")
+    assert "without spaces" in messages(failed(results))
+    assert "without spaces" in messages(failed(run_check("check_global_attribute_values", grid_label="site-a b")))
+    # the directory must match the attribute exactly; there is no "first value" rule
+    assert failed(run_check("check_directory_structure", activity_id="obs4MIPs CMIP7"))
 
 
 # --------------------------------------------------------------------------------------

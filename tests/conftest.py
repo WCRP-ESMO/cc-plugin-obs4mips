@@ -67,18 +67,19 @@ def run_check(tmp_path, monkeypatch):
       directory=...     replace GOOD_DIRECTORY
       filename=...      replace GOOD_FILENAME
       time_values=...   replace the time axis (days since 2000-01-01)
+      time_name=...     name of the time variable (default "time")
       anything else     is a global attribute value
     """
     monkeypatch.chdir(tmp_path)  # relative paths: the directory checks see only what we write
 
     def run(method, *, drop=(), directory=GOOD_DIRECTORY, filename=GOOD_FILENAME,
-            time_values=(15.0, 45.0), **changes):  # fmt: skip
+            time_values=(15.0, 45.0), time_name="time", **changes):  # fmt: skip
         values = {**GOOD_VALUES, **changes}
         path = Path(directory) / filename
         path.parent.mkdir(parents=True, exist_ok=True)
         with Dataset(path, "w") as ds:
             ds.createDimension("time", len(time_values))
-            time = ds.createVariable("time", "f8", ("time",))
+            time = ds.createVariable(time_name, "f8", ("time",))
             time.units, time.calendar = "days since 2000-01-01", "standard"
             time[:] = np.array(time_values)
             variable = ds.createVariable(values["variable_id"], "f4", ("time",))
