@@ -2,50 +2,60 @@
 Compliance Checker checks for the Obs4MIPs Data Specifications (ODS).
 
 Every method named `check_*` is run by compliance-checker and returns Result objects.
-Which attributes exist, how required they are, what values they may take and what the
-file name and directory look like all come from the generated bundle (see specs.py).
-Only the checks that need the dataset itself or several attributes at once are written
-out by hand here.
+Which attributes exist, how required they are, what values they may take, and what the
+file name and directory look like all come from the generated obs4MIPs_CVs bundle.
 
-Where to change things:
-  - an ODS fact (attribute, requirement, allowed value, DRS part): the obs4MIPs_CVs repo,
-    then run scripts/sync_cvs.py
-  - a format a regex cannot express, or a strictness policy: specs.py
-  - how check logic works: this file
+Currently, a user has to create the obs4MIPs_CVs manually using `scripts/sync_cvs.py`
+and `cv_sources.json`. When synced, a file is stored at `cv_data/obs4mips.json` which
+contains `global_attributes.json`, `drs_specs.yaml`, and the CVs themselves from
+obs4MIPs_CVs, where "allowed" are a list of allowed CVs, and "patterns" are regex
+patterns that values must match.
 
 Below, you will find checks organized as:
   - General checks (global attributes presence/format, CVs, DRS compliance)
   - Global attribute-specific checks
   - Inter-attribute checks
+
+Developer notes:
+----------------
+Before making a change to cc-plugin-obs4mips, check if you can instead make the change
+in the obs4MIPs_CVs repository first.
+
+Where developers should make changes:
+  - obs4MIPs_CVs repo: change an ODS fact (attribute, requirement, CV, regex, DRS, etc.)
+  - cc-plugin-obs4mips/checks.py: logic or format that a simple regex cannot express
+  - cc-plugin-obs4mips/checks.py: check validity of assigned attributes to data itself
 """
 
 import ast
 import re
 from difflib import get_close_matches
 from pathlib import Path
+from urllib.parse import urlsplit
+from uuid import UUID
 
 from compliance_checker.base import BaseCheck, BaseNCCheck, Result
 from compliance_checker.cf import util as cfutil
 from netCDF4 import num2date
 
 from cc_plugin_obs4mips import __version__
-from cc_plugin_obs4mips.specs import (
+from cc_plugin_obs4mips.enums import (
     BUNDLE,
-    FORBIDDEN_ID_CHARS,
-    FORMAT_CHECKS,
     FREQUENCY_TIME_DIGITS,
-    PROCESSING_CODE_REGEX,
     VERSION_REGEX,
 )
 
 # Parse facets of the CV bundle for easier access --------------------------------------
 
-ATTRS = BUNDLE["attributes"]
-DRS = BUNDLE["drs"]
-HIGH, MEDIUM, LOW = BaseCheck.HIGH, BaseCheck.MEDIUM, BaseCheck.LOW
-WEIGHT = {"required": HIGH, "recommended": MEDIUM, "optional": LOW}
-SEPARATORS = {"space": None, "comma": ",", "semicolon": ";"}  # None = any whitespace
-TIME_FORMATS = {
+ODS_ATTRS = BUNDLE["attributes"]
+ODS_DRS = BUNDLE["drs"]
+ODS_WEIGHT = {
+    "required": BaseCheck.HIGH,
+    "recommended": BaseCheck.MEDIUM,
+    "optional": BaseCheck.LOW,
+}
+ODS_SEPARATORS = {"space": None}  # None = any whitespace
+ODS_DRS_TIME_RANGE_FORMATS = {
     4: "%Y",
     6: "%Y%m",
     8: "%Y%m%d",
@@ -53,7 +63,7 @@ TIME_FORMATS = {
     12: "%Y%m%d%H%M",
     14: "%Y%m%d%H%M%S",
 }
-SITE_ATTRS = (
+ODS_SITE_ATTRS = (
     "product",
     "nominal_resolution",
     "grid",
@@ -81,16 +91,16 @@ def condition_holds(expression: str, attrs: dict) -> bool:
     tree = ast.parse(expression, mode="eval")
     if not all(isinstance(node, _CONDITION_NODES) for node in ast.walk(tree)):
         raise ValueError(f"unsupported condition: {expression!r}")
-    names = {name: str(attrs.get(name, "")).strip() for name in ATTRS}
+    names = {name: str(attrs.get(name, "")).strip() for name in ODS_ATTRS}
     return bool(eval(compile(tree, "<condition>", "eval"), {"__builtins__": {}}, names))
 
 
 def split_value(name: str, value: str) -> list[str]:
     """Split a multi-valued attribute on the separator from the CVs (else one value)."""
-    separator = ATTRS[name]["separator"]
+    separator = ODS_ATTRS[name]["separator"]
     if not separator:
         return [value]
-    return [token.strip() for token in value.split(SEPARATORS[separator])]
+    return [token.strip() for token in value.split(ODS_SEPARATORS[separator])]
 
 
 def unregistered_terms(name: str, value: str) -> list[tuple[str, list[str]]]:
@@ -98,7 +108,10 @@ def unregistered_terms(name: str, value: str) -> list[tuple[str, list[str]]]:
     Screen for global attribute value typos by returning similar CV terms for terms that
     are not found in the CVs.
     """
-    allowed, patterns = ATTRS[name].get("allowed", []), ATTRS[name].get("patterns", [])
+    allowed, patterns = (
+        ODS_ATTRS[name].get("allowed", []),
+        ODS_ATTRS[name].get("patterns", []),
+    )
     by_folded = {term.casefold(): term for term in allowed}
     unregistered = []
     for token in split_value(name, value):
@@ -107,6 +120,19 @@ def unregistered_terms(name: str, value: str) -> list[tuple[str, list[str]]]:
         close = get_close_matches(token.casefold(), list(by_folded), n=3, cutoff=0.5)
         unregistered.append((token, [by_folded[c] for c in close]))
     return unregistered
+
+
+def _is_url(value):
+    parsed = urlsplit(value)
+    return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
+
+
+def _is_uuid(value):
+    try:
+        UUID(value.rsplit("/", 1)[-1])
+    except ValueError:
+        return False
+    return True
 
 
 # Validation checks stored in a compliance-checker class -------------------------------
@@ -118,7 +144,7 @@ class Obs4MipsCheck(BaseNCCheck, BaseCheck):
     _cc_spec_version = BUNDLE["ods_version"]  # Gathered from the obs4MIPs_CVs repo
     _cc_description = f"WCRP-ESMO obs4MIPs {BUNDLE['ods_version']} compliance checks"
     _cc_checker_version = __version__
-    _cc_display_headers = {HIGH: "Required", MEDIUM: "Recommended", LOW: "Suggested"}
+    _cc_display_headers = ODS_WEIGHT
 
     def setup(self, ds):
         """Collect all global attributes from the supplied NetCDF."""
@@ -126,74 +152,78 @@ class Obs4MipsCheck(BaseNCCheck, BaseCheck):
 
     def _level(self, name):
         """
-        Determine the requirement level for a global attribute based on the CVs AND
-        conditional rules.
+        Using global_attributes.json from the CVs, read the requirement level for a
+        given attribute (self.attrs[name]) using the "requirement" key or the
+        "conditional"["requirement"] key if the condition holds.
         """
-        condition = ATTRS[name]["conditional"]
+        # if global_attributes.json has a non-null conditional key ...
+        condition = ODS_ATTRS[name]["conditional"]
+        # check if the condition holds, and if it does, return the requirement level
         if condition and condition_holds(condition["when"], self.attrs):
             return condition["requirement"]
-        return ATTRS[name]["requirement"]
+        # otherwise, use the value associated with the attribute's requirement key
+        return ODS_ATTRS[name]["requirement"]
 
     # Basic checks ---------------------------------------------------------------------
 
-    def check_global_attributes_present(self, ds) -> list[Result]:
-        """Required and recommended global attributes must be present and not empty."""
+    def check_global_attribute_presence(self) -> list[Result]:
+        """Required global attributes must be present and not empty."""
         results = []
-        for name in ATTRS:
+        for name in ODS_ATTRS:
             level = self._level(name)
-            if level == "optional":
+            if level != "required":
                 continue
             present = str(self.attrs.get(name, "")).strip() != ""
             results.append(
                 Result(
-                    WEIGHT[level],
+                    ODS_WEIGHT[level],
                     present,
-                    "Global attributes present",
-                    [] if present else [f"missing or empty: {name}"],
+                    "Required global attributes",
+                    [] if present else [f"missing or empty {name}"],
                 )
             )
         return results
 
-    def check_global_attribute_values(self, ds) -> list[Result]:
-        """Check values against the CVs (allowed values/patterns) and FORMAT_CHECKS."""
+    def check_global_attribute_cvs(self) -> list[Result]:
+        """Check values against the CVs (allowed values/patterns)."""
         results = []
 
-        # Values used as DRS parts end up in file and directory names: no whitespace
-        drs_parts = {p["name"] for spec in DRS.values() for p in spec["parts"]}
+        # if an attribute is part of the DRS, it must not contain whitespace
+        drs_parts = {p["name"] for spec in ODS_DRS.values() for p in spec["parts"]}
         for name in sorted(drs_parts & set(self.attrs)):
             value = self.attrs[name]
             if isinstance(value, str) and re.search(r"\s", value.strip()):
                 results.append(
                     Result(
-                        HIGH,
-                        False,
-                        "DRS values without whitespace",
-                        [
+                        weight=ODS_WEIGHT["required"],
+                        value=False,
+                        name="Data Reference Structure",
+                        msgs=[
                             f"{name}={value!r} is part of the DRS and must be a single value without spaces"
                         ],
                     )
                 )
 
-        # Loop through global attributes
+        # global attrs should be strings
         for name, value in self.attrs.items():
-            # Skip attributes that are not defined in the CVs or are empty strings
-            attr = ATTRS.get(name)
+            attr = ODS_ATTRS.get(name)
             if attr is None or (isinstance(value, str) and not value.strip()):
-                continue  # not an ODS attribute or empty
+                continue  # skip attributes not in ODS_ATTRS or empty strings
             if not isinstance(value, str):
                 results.append(
                     Result(
-                        HIGH,
-                        False,
-                        "Global attribute values",
-                        [f"{name}={value!r} must be a string"],
+                        weight=ODS_WEIGHT["required"],
+                        value=False,
+                        name="CVs mismatch",
+                        msgs=[f"{name}={value!r} must be a string"],
                     )
                 )
                 continue
 
-            # Check CV terms for this attribute
+            # use "allowed" key and "patterns" keys in cv_data/obs4mips.json to check...
             if "allowed" in attr or "patterns" in attr:
                 messages = []
+                # ... if an attribute value is present in the CVs
                 for token, similar in unregistered_terms(name, value):
                     message = f"{name}={token!r} is not registered in the CV for {name}"
                     if similar:
@@ -203,46 +233,51 @@ class Obs4MipsCheck(BaseNCCheck, BaseCheck):
                     messages.append(message)
                 results.append(
                     Result(
-                        MEDIUM,
-                        not messages,
-                        "Unregistered controlled vocabulary terms",
-                        messages,
+                        weight=ODS_WEIGHT["recommended"],
+                        value=not messages,
+                        name="CVs mismatch",
+                        msgs=messages,
                     )
                 )
+                # ... if an attribute value does not match the allowed patterns
+                if "patterns" in attr:
+                    pattern_messages = []
+                    for pattern in attr["patterns"]:
+                        if not re.fullmatch(pattern, value):
+                            pattern_messages.append(
+                                f"{name}={value!r} does not match the allowed pattern {pattern!r}"
+                            )
+                    if pattern_messages:
+                        results.append(
+                            Result(
+                                weight=ODS_WEIGHT["required"],
+                                value=False,
+                                name="CVs mismatch",
+                                msgs=pattern_messages,
+                            )
+                        )
 
-            # Check complex format defined in specs.py for this attribute (if applicable)
-            if name in FORMAT_CHECKS:
-                is_valid, hint = FORMAT_CHECKS[name]
-                messages = [
-                    f"{name}={t!r}: {hint}"
-                    for t in split_value(name, value)
-                    if not is_valid(t)
-                ]
-                results.append(
-                    Result(
-                        WEIGHT[self._level(name)],
-                        not messages,
-                        "Global attribute formats",
-                        messages,
-                    )
-                )
         return results
 
-    def _check_time_range(self, ds, time_range):
+    def check_drs(self):
+        """
+        Required -
+        Ensure each drs item is A-Z, a-z, 0-9, or "-" except for variable_id, which
+        shouldn't have "-"
+        """
+        return None
+
+    def _check_drs_filename_time_range(self, ds, time_range):
         """
         Helper check used below to validate time_range rules: structure, digits per
         frequency, match to the time axis, fx.
         """
+        results = []
 
-        # Get the frequency attribute from the global attrs
+        # get the frequency attribute from the data's global attrs
         frequency = self.attrs.get("frequency")
 
-        # Get the actual time data
-        # compliance-checker finds time variables by standard_name, axis or "<unit> since"
-        # units, so the variable may be called anything (time, TIME, t, ...). It returns a
-        # set and its own checks loop over all of it; ODS file names describe one axis, so
-        # we pick one: CF-declared (standard_name/axis) first, then a coordinate variable
-        # (also a dimension), then by name.
+        # ranking function to prefer CF time standard_name and axis name
         def rank(name):
             var = ds.variables[name]
             declared = (
@@ -251,66 +286,159 @@ class Obs4MipsCheck(BaseNCCheck, BaseCheck):
             )
             return (not declared, name not in ds.dimensions, name)
 
-        time_names = sorted(cfutil.get_time_variables(ds), key=rank)
-        time = ds.variables[time_names[0]] if time_names else None
+        # get the actual time data using compliance-checker tooling (cfutil)
+        time_names = sorted(cfutil.get_time_variables(ds), key=rank)  # possible names
+        time_var = time_names[0] if time_names else None  # likely time variable name
+        time_arr = ds.variables[time_var] if time_var else None  # time data
+        has_time_values = time_arr is not None and len(time_arr) > 0  # boolean
 
-        # If "fx" set but time values exist, it's an inconsistency
-        has_time_values = time is not None and len(time) > 0
+        # if time variable is found but has no data, that's an issue
+        if time_var and not has_time_values:
+            results.append(
+                Result(
+                    weight=ODS_WEIGHT["required"],
+                    value=False,
+                    name="Time variable",
+                    msgs=[f"time variable {time_var!r} has no data associated with it"],
+                )
+            )
+
+        # if more than one time variable found, recommend using "time" & "T"
+        if len(time_names) > 1:
+            results.append(
+                Result(
+                    weight=ODS_WEIGHT["optional"],
+                    value=False,
+                    name="Time variable",
+                    msgs=[
+                        f"multiple time variables detected {time_names=}; recommend using only 'time' with axis 'T'"
+                    ],
+                )
+            )
+
+        # if 1 time var is found but it's not "time" with axis "T", recommend changing
+        if len(time_names) == 1 and (
+            getattr(time_var, "standard_name", None) != "time"
+            or getattr(time_var, "axis", None) != "T"
+        ):
+            results.append(
+                Result(
+                    weight=ODS_WEIGHT["optional"],
+                    value=False,
+                    name="Time variable",
+                    msgs=[
+                        f"consider renaming time variable {time_names[0]!r} to 'time' with axis 'T'"
+                    ],
+                )
+            )
+
+        # if time_range is not specified ...
         if time_range is None:
-            if frequency != "fx" and has_time_values:
-                return ["data with time steps must include time_range in the file name"]
-            return []
+            # ... and there are more than one time data points ...
+            if has_time_values and len(time_arr) > 1:  # type: ignore
+                # ... and frequnecy was set to fixed, that's incorrect
+                if frequency == "fx":
+                    results.append(
+                        Result(
+                            weight=ODS_WEIGHT["required"],
+                            value=False,
+                            name="Frequency attribute",
+                            msgs=[
+                                "fixed frequency 'fx' data must not have more than 1 time value"
+                            ],
+                        )
+                    )
+                # ... otherwise, time_range must be included in the file name
+                else:
+                    results.append(
+                        Result(
+                            weight=ODS_WEIGHT["required"],
+                            value=False,
+                            name="Filename",
+                            msgs=[
+                                "data with time steps must include time_range in the file name"
+                            ],
+                        )
+                    )
 
-        # If "fx" frequency, time_range should be omitted
-        problems = []
+        # if "fx" is frequency, time_range should be omitted
         if frequency == "fx":
-            problems.append("time-invariant frequency 'fx' must omit time_range")
+            results.append(
+                Result(
+                    weight=ODS_WEIGHT["required"],
+                    value=False,
+                    name="Frequency attribute",
+                    msgs=["time-invariant frequency 'fx' must omit time_range"],
+                )
+            )
 
-        # Validate the structure and order of the time_range string
+        # time_range is not a global attr, but it should be validated as part of the DRS
         match = re.fullmatch(r"(\d+)-(\d+)", time_range)
         if (
             not match
             or len(match[1]) != len(match[2])
-            or len(match[1]) not in TIME_FORMATS
+            or len(match[1]) not in ODS_DRS_TIME_RANGE_FORMATS
             or match[1] > match[2]
         ):
-            problems.append(
-                f"time_range={time_range!r} must contain ordered, equally precise "
-                "CMIP6 (http://goo.gl/v1drZl) dates separated by one hyphen"
+            results.append(
+                Result(
+                    weight=ODS_WEIGHT["required"],
+                    value=False,
+                    name="Filename",
+                    msgs=[
+                        f"time_range={time_range!r} must contain ordered, equally precise "
+                        "CMIP6 (http://goo.gl/v1drZl) dates separated by one hyphen"
+                    ],
+                )
             )
-            return problems
 
-        # Ensure time range matches the expected number of digits given the frequency
+        # ensure time range matches the expected number of digits given the frequency
         start, end = match[1], match[2]
         digits = FREQUENCY_TIME_DIGITS.get(frequency) if frequency is not None else None
         if digits is not None and len(start) != digits:
-            problems.append(
-                f"time_range={time_range!r} has {len(start)}-digit labels; "
-                f"frequency={frequency!r} requires {digits}-digit labels"
+            results.append(
+                Result(
+                    weight=ODS_WEIGHT["required"],
+                    value=False,
+                    name="Filename",
+                    msgs=[
+                        f"time_range={time_range!r} has {len(start)}-digit labels; "
+                        f"frequency={frequency!r} requires {digits}-digit labels"
+                    ],
+                )
             )
 
-        # If time values exist, check that they match the start and end of the time_range
+        # if time values exist, check that they match the start and end of the time_range
         if has_time_values:
             try:
                 dates = num2date(
-                    [time[0], time[-1]],
-                    units=time.units,
-                    calendar=getattr(time, "calendar", "standard"),
+                    [time_arr[0], time_arr[-1]],
+                    units=time_arr.units,
+                    calendar=getattr(time_arr, "calendar", "standard"),
                 )
-                actual = tuple(d.strftime(TIME_FORMATS[len(start)]) for d in dates)
+                actual = tuple(
+                    d.strftime(ODS_DRS_TIME_RANGE_FORMATS[len(start)]) for d in dates
+                )
             except (AttributeError, TypeError, ValueError):
                 actual = None  # an undecodable time axis is reported by the CF checks
             if actual is not None and (start, end) != actual:
-                problems.append(
-                    f"file-name time_range={time_range!r} does not match the time coordinate span {'-'.join(actual)!r}"
+                results.append(
+                    Result(
+                        weight=ODS_WEIGHT["required"],
+                        value=False,
+                        name="Filename",
+                        msgs=[
+                            f"file-name time_range={time_range!r} does not match the time coordinate span {'-'.join(actual)!r}"
+                        ],
+                    )
                 )
-        return problems
+        return results
 
-    def check_filename(self, ds):
+    def check_drs_filename(self, ds):
         """File name must follow the DRS file_name template and agree with the attributes."""
 
-        # Get the file name specification from the DRS template
-        spec = DRS["file_name"]
+        # get the file name specification from the DRS template
+        spec = ODS_DRS["file_name"]
         separator, extension = spec["separator"], "." + spec["extension"]
         parts = [p["name"] for p in spec["parts"]]
         required = [p["name"] for p in spec["parts"] if p["required"]]
@@ -320,211 +448,228 @@ class Obs4MipsCheck(BaseNCCheck, BaseCheck):
             + extension
         )
 
-        # Extract the actual file name from the NetCDF path
+        # extract the actual file name from the NetCDF path
         filename = Path(ds.filepath()).name
 
-        # Check if the file name follows the DRS template
-        problems = []
+        # ensure filename ends with the correct extension
+        results = []
         if not filename.endswith(extension):
-            problems.append(f"file name {filename!r} must end with {extension!r}")
+            results.append(
+                Result(
+                    weight=ODS_WEIGHT["required"],
+                    value=False,
+                    name="Filename",
+                    msgs=[f"file name {filename!r} must end with {extension!r}"],
+                )
+            )
+
+        # ensure the file name has the correct number of parts according to the DRS
         tokens = filename.removesuffix(extension).split(separator)
         if not len(required) <= len(tokens) <= len(parts):
-            problems.append(f"file name must follow {template}")
-            return Result(HIGH, False, "ODS file name", problems)
+            results.append(
+                Result(
+                    weight=ODS_WEIGHT["required"],
+                    value=False,
+                    name="Filename",
+                    msgs=[f"file name must follow {template}"],
+                )
+            )
+            return results
 
-        # Check that file name parts match the global attributes they map to
+        # check that file name parts match the global attributes they map to
         # (except time_range, which isn't an ODS global attribute)
         time_range = None
         for part, token in zip(parts, tokens):
             if part == "time_range":
                 time_range = token
             elif part in self.attrs and token != self.attrs[part]:
-                problems.append(
-                    f"file-name {part}={token!r} does not match global attribute {part}={self.attrs[part]!r}"
+                results.append(
+                    Result(
+                        weight=ODS_WEIGHT["required"],
+                        value=False,
+                        name="Filename",
+                        msgs=[
+                            f"file-name {part}={token!r} does not match global attribute {part}={self.attrs[part]!r}"
+                        ],
+                    )
                 )
+
+        # use function above to do data-specific checks for time range
         if "time_range" in parts:
-            problems += self._check_time_range(ds, time_range)
-        return Result(HIGH, not problems, "ODS file name", problems)
+            results += self._check_drs_filename_time_range(ds, time_range)
+        return results
 
-    def check_directory_structure(self, ds):
+    def check_drs_directory(self, ds):
         """The trailing directories must follow the DRS directory template."""
+        results = []
 
-        # Extract the DRS directory specification and template
-        spec = DRS["directory"]
+        # extract the DRS directory specification and template
+        spec = ODS_DRS["directory"]
         parts = [p["name"] for p in spec["parts"]]
         template = spec["separator"].join(f"<{p}>" for p in parts)
-        name = "ODS directory structure (DRS)"
 
-        # Get the actual directory structure from the file path
+        # get the actual directory structure from the file path
         path = Path(ds.filepath())
 
-        # Ensure we have enough directory levels to match the DRS parts
+        # ensure we have enough directory levels to match the DRS parts
         directories = path.parent.parts[1:] if path.is_absolute() else path.parent.parts
         if len(directories) < len(parts):
-            return Result(
-                HIGH,
-                False,
-                name,
-                [
-                    f"Directory structure must follow {template}",
-                    f"Provided directory structure: {path.parent}\n  - DRS has {len(directories)} directory "
-                    f"levels; ODS requires {len(parts)} trailing DRS levels",
-                ],
+            results.append(
+                Result(
+                    weight=ODS_WEIGHT["required"],
+                    value=False,
+                    name="Directory structure",
+                    msgs=[
+                        f"directory structure must follow {template}",
+                        f"provided directory structure: {path.parent}\n  - DRS has {len(directories)} directory "
+                        f"levels; ODS requires {len(parts)} trailing DRS levels",
+                    ],
+                )
             )
 
-        # Check each DRS part against the corresponding directory level
-        problems = []
+        # check each DRS part against the corresponding directory level
         for part, actual in zip(parts, directories[-len(parts) :]):
             if part == "version":
                 if not re.fullmatch(VERSION_REGEX, actual):
-                    problems.append(
-                        f"DRS version {actual!r} does not match the required form {VERSION_REGEX!r}"
+                    results.append(
+                        Result(
+                            weight=ODS_WEIGHT["required"],
+                            value=False,
+                            name="Directory structure",
+                            msgs=[
+                                f"DRS version {actual!r} does not match the required form {VERSION_REGEX!r}"
+                            ],
+                        )
                     )
             elif part in self.attrs:
                 expected = str(self.attrs[part])
                 if actual != expected:
-                    problems.append(
-                        f"DRS {part} {actual!r} does not match the {part} global attribute: {expected!r}"
+                    results.append(
+                        Result(
+                            weight=ODS_WEIGHT["required"],
+                            value=False,
+                            name="Directory structure",
+                            msgs=[
+                                f"DRS {part} {actual!r} does not match the {part} global attribute: {expected!r}"
+                            ],
+                        )
                     )
-        return Result(
-            HIGH,
-            not problems,
-            name,
-            []
-            if not problems
-            else [
-                f"Directory structure must follow {template}",
-                f"Provided directory structure: {path.parent}"
-                + "".join(f"\n  - {p}" for p in problems),
-            ],
-        )
+        return results
 
     # Attribute-specific checks --------------------------------------------------------
 
-    def check_processing_code_location_repository(self, ds):
-        """Recommend contributing processing scripts to the obs4MIPs repository."""
-        location = self.attrs.get("processing_code_location")
-        if location is None:
+    def check_contact(self):
+        """Recommend contact as 'Firstname Lastname (email)' or just 'email'."""
+        contact = self.attrs.get("contact")
+        if contact is None:
             return None
-        valid = (
-            isinstance(location, str)
-            and re.fullmatch(PROCESSING_CODE_REGEX, location) is not None
+        email = r"[^\s()@]+@[^\s()@]+\.[^\s()@]+"
+        valid = isinstance(contact, str) and bool(
+            re.fullmatch(rf"{email}|[^()]*\S\s*\({email}\)", contact.strip())
         )
         return Result(
-            MEDIUM,
+            ODS_WEIGHT["optional"],
             valid,
-            "processing_code_location",
+            "contact",
             []
             if valid
             else [
-                "We recommend forking https://github.com/WCRP-ESMO/obs4MIPs, adding your "
-                "processing scripts to the `examples` directory, and submitting a PR."
+                "We recommend contact be 'Firstname Lastname (email)' or just an email, "
+                "e.g. 'Jane Doe (jane@example.org)' or 'jane@example.org'"
             ],
         )
 
-    def check_anomaly_units_metadata(self, ds):
-        """A variable with difference units_metadata must have a variable_id ending in 'anom'."""
+    def check_creation_date(self):
+        """
+        Recommended -
+        Check that the creation_date attribute is the same as the data file's actual
+        creation date.
+        """
+        return None
 
-        # Get the variable ID and corresponding variable from the dataset
-        variable_id = self.attrs.get("variable_id")
-        variable = ds.variables.get(variable_id)
-        if variable is None:
-            return None
+    def check_data_specs_version(self):
+        """
+        Required -
+        Check that the data_specs_version matches `cv_version` in the
+        `esgvoc_manifest.yaml` in obs4MIPs_CVs. Maybe need to update sync_cvs to
+        include the esgvoc_manifest.yaml file.
+        """
+        return None
 
-        # Check for units_metadata local attribute on the variable
-        units_metadata = getattr(variable, "units_metadata", None)
-        is_difference = (
-            isinstance(units_metadata, str) and "difference" in units_metadata.lower()
-        )
-        has_suffix = variable_id.endswith("anom")
-        if not is_difference and not has_suffix:
-            return None
+    def check_doi(self):
+        """
+        Optional -
+        DOI isn't in CVs, but ODS has a recommended format for it that includes the
+        https prefix: https://doi.org/xx.xxxx/xxxxxxxx
+        """
+        return None
 
-        # If units_metadata indicates a difference, the variable ID must end with 'anom'
-        messages = []
-        if is_difference and not has_suffix:
-            messages.append(
-                f"{variable_id}:units_metadata={units_metadata!r} identifies a difference, "
-                "so variable_id must end in 'anom'"
-            )
-        if has_suffix and not is_difference:
-            messages.append(
-                f"{variable_id} is an anomaly variable and must define variable-level "
-                "units_metadata identifying it as a difference"
-            )
-        return Result(
-            HIGH, not messages, "Anomaly variable naming and units metadata", messages
-        )
+    def check_external_variables(self):
+        """
+        Optional -
+        If external_variables are cell measures, e.g., one or more of 'areacella',
+        'areacello', 'volcella', 'volcello', recommend only using the 'bounds' attribute
+        and dropping the cell measures from the external_variables list if the
+        coordinate system is simple.
+        """
+        return None
+
+    def check_grid(self):
+        """
+        Optional -
+        Recommend that the grid attribute details the N by N resolution, horizontal
+        and/or vertical datum, projection, re-gridding procedure if different from the
+        original data, and any other relevant information regarding the grid.
+        """
+        return None
+
+    def check_license(self):
+        """
+        Optional -
+        The recommended format is: “Data in this file produced by <Your Centre Name> is
+        licensed under a Creative Commons Attribution-4.0 International (CC BY 4.0)
+        License (https://creativecommons.org/licenses/). Use of the data must be
+        acknowledged following guidelines found at <a URL maintained by you>. Further
+        information about this data, including some limitations, can be found via
+        <some URL maintained by you>.”
+        """
+        return None
+
+    def check_nominal_resolution(self):
+        """
+        Required -
+        Nominal resolution is calculated in a specific way, so we should check using the
+        lat/lon data (unless site coordinates are used) if nominal_resolution was
+        estimated correctly. See /Users/6ru/Downloads/CMIP6_global_attributes_filenames_CVs.docx
+        Appendix 2 for how to estimate it.
+
+        If grid is regular 1 x 1 degree, the nominal resolution should be "1x1 degree"
+        (conflictingly, "1x1 degree" is not in the CVs)
+        """
+        return None
+
+    def check_processing_code_location(self):
+        """
+        Recommend -
+        Recommend that the processing_code_location attribute points to a valid URL
+        where the processing code can be found or will be found.
+        """
+        return None
+
+    def check_source_data_retrieval_date(self):
+        """
+        Required -
+        Recommend that the source_data_retrieval_date attribute is provided and follows
+        the ISO 8601 UTC format: YYYY-MM-DDTHH:MM:SSZ.
+        """
+        return None
+
+    def check_source_data_url(self):
+        """
+        Optional -
+        Recommend that the source_data_url attribute is provided and points to a valid URL
+        where the source data can be found.
+        """
+        return None
 
     # Multi-attribute checks -----------------------------------------------------------
-
-    def check_source_id_matches_label_and_version(self, ds):
-        """source_id is source_label-source_version_number with forbidden characters as '-'."""
-        if (
-            not {"source_id", "source_label", "source_version_number"}
-            <= self.attrs.keys()
-        ):
-            return None
-        expected = FORBIDDEN_ID_CHARS.sub(
-            "-", f"{self.attrs['source_label']}-{self.attrs['source_version_number']}"
-        )
-        valid = self.attrs["source_id"] == expected
-        return Result(
-            HIGH,
-            valid,
-            "source_id derived from source_label + source_version_number",
-            []
-            if valid
-            else [f"source_id={self.attrs['source_id']!r} != expected {expected!r}"],
-        )
-
-    def check_site_metadata_consistency(self, ds):
-        """Site attributes must agree with each other (individual site or site collection)."""
-        values = {name: str(self.attrs.get(name, "")).strip() for name in SITE_ATTRS}
-        lowered = {name: value.lower() for name, value in values.items()}
-        markers = {
-            lowered[name]
-            for name in ("product", "nominal_resolution", "grid", "grid_label")
-        }
-        is_collection = "site-collection" in markers
-        is_individual = bool(markers & {"site", "site-observations"}) or lowered[
-            "grid_label"
-        ].startswith("site-")
-        if not is_collection and not is_individual:
-            return None
-
-        if is_collection:
-            kind = "a site collection"
-            expected = {
-                "product": "site-collection",
-                "nominal_resolution": "site-collection",
-                "grid": "site-collection",
-                "grid_label": "site-collection",
-                "site_id": "collection",
-                "site_location": "collection",
-            }
-        else:
-            kind = "an individual site"
-            expected = {
-                "product": "site-observations",
-                "nominal_resolution": "site",
-                "grid": "site",
-            }
-
-        problems = [
-            f"{name}={values[name]!r}; expected {wanted!r} for {kind}"
-            for name, wanted in expected.items()
-            if name in self.attrs and lowered[name] != wanted
-        ]
-        if is_individual and not is_collection and "grid_label" in self.attrs:
-            # Appendix 3 says `site` while Table 1 says `site-<site_id>`: accept both
-            # until that draft inconsistency is resolved.
-            allowed = {"site"} | (
-                {f"site-{lowered['site_id']}"} if values["site_id"] else set()
-            )
-            if lowered["grid_label"] not in allowed:
-                problems.append(
-                    f"grid_label={values['grid_label']!r}; expected 'site' or "
-                    f"'site-{values['site_id']}' for an individual site"
-                )
-        return Result(HIGH, not problems, "Site metadata consistency", problems)

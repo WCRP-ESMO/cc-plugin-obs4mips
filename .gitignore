@@ -3,3 +3,4 @@ cc_plugin_obs4mips/_version.py
 *egg-info*
 *data*
 *.DS_Store*
+*.lock*

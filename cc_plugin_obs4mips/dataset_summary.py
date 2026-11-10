@@ -13,8 +13,7 @@ from netCDF4 import Dataset
 
 from cc_plugin_obs4mips import __version__
 from cc_plugin_obs4mips.checks import unregistered_terms
-from cc_plugin_obs4mips.specs import BUNDLE
-
+from cc_plugin_obs4mips.enums import BUNDLE
 
 SUMMARY_SCHEMA = "obs4mips-dataset-summary"
 SUMMARY_SCHEMA_VERSION = "1.0.0"
@@ -81,7 +80,11 @@ def _cv_update_candidates(global_attributes: dict[str, Any]) -> dict[str, Any]:
     terms = []
     for name, value in global_attributes.items():
         attr = BUNDLE["attributes"].get(name)
-        if not attr or not isinstance(value, str) or not ("allowed" in attr or "patterns" in attr):
+        if (
+            not attr
+            or not isinstance(value, str)
+            or not ("allowed" in attr or "patterns" in attr)
+        ):
             continue
         for token, similar in unregistered_terms(name, value):
             candidate = {
