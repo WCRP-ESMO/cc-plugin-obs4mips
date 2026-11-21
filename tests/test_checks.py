@@ -7,18 +7,20 @@ from compliance_checker.base import BaseCheck
 from netCDF4 import Dataset
 
 from cc_plugin_obs4mips.checks import (
-    ODS_ATTRS,
-    ODS_DRS,
     Obs4MipsCheck,
     _nominal_resolution_km,
-    condition_holds,
     mean_resolution_km,
     nominal_resolutions_km,
-    split_value,
-    unregistered_terms,
 )
-from cc_plugin_obs4mips.enums import BUNDLE, DRS_VALUE_REGEX, FREQUENCY_TIME_DIGITS
 from tests.conftest import GOOD_VALUES, failed, messages
+
+BUNDLE = Obs4MipsCheck.bundle()
+ODS_ATTRS = BUNDLE["attributes"]
+ODS_DRS = BUNDLE["drs"]
+DRS_VALUE_REGEX = Obs4MipsCheck.DRS_VALUE_REGEX
+FREQUENCY_TIME_DIGITS = Obs4MipsCheck.FREQUENCY_TIME_DIGITS
+split_value = Obs4MipsCheck.split_value
+unregistered_terms = Obs4MipsCheck.unregistered_terms
 
 CHECK_METHODS = [m for m in dir(Obs4MipsCheck) if m.startswith("check_")]
 HIGH, MEDIUM, LOW = BaseCheck.HIGH, BaseCheck.MEDIUM, BaseCheck.LOW
@@ -80,14 +82,14 @@ def test_display_headers_cover_every_weight():
 
 
 def test_condition_grammar():
-    assert condition_holds(
+    assert Obs4MipsCheck().condition_holds(
         'product == "x" or realm != "y"', {"product": "x", "realm": "y"}
     )
-    assert not condition_holds('not product == "x"', {"product": "x"})
-    assert condition_holds('has_aux_unc == "TRUE"', {"has_aux_unc": "TRUE"})
-    assert not condition_holds('has_aux_unc == "TRUE"', {})
+    assert not Obs4MipsCheck().condition_holds('not product == "x"', {"product": "x"})
+    assert Obs4MipsCheck().condition_holds('has_aux_unc == "TRUE"', {"has_aux_unc": "TRUE"})
+    assert not Obs4MipsCheck().condition_holds('has_aux_unc == "TRUE"', {})
     with pytest.raises(ValueError):
-        condition_holds("__import__('os').system('true')", {})
+        Obs4MipsCheck().condition_holds("__import__('os').system('true')", {})
 
 
 def test_split_value_uses_the_separator_from_the_cvs():
@@ -833,3 +835,40 @@ def test_site_check_ignores_non_site_data_and_missing_attributes(run_check):
     assert run_check("check_site") == []
     assert run_check("check_site", **{**SITE, "grid": ""}) == []
     assert run_check("check_site", **SITE, drop=("nominal_resolution",)) == []
+
+
+# --------------------------------------------------------------------------------------
+# ODS versions
+# --------------------------------------------------------------------------------------
+
+
+def test_only_released_ods_versions_are_registered_as_suites():
+    from importlib.metadata import entry_points
+
+    suites = {e.name: e.value for e in entry_points(group="compliance_checker.suites")}
+    obs4mips = {n: v for n, v in suites.items() if n.split(":")[0] == "obs4mips"}
+    assert set(obs4mips) == {"obs4mips", "obs4mips:2.6"}  # add a name when an ODS is released
+
+
+def test_there_are_no_cvs_for_an_unreleased_ods_version():
+    from cc_plugin_obs4mips.cv_sync import load_bundle
+
+    with pytest.raises(SystemExit, match="no CVs for ODS 2.7"):
+        load_bundle("2.7")
+
+
+def test_the_base_class_is_not_a_suite():
+    from cc_plugin_obs4mips.checks import Obs4MipsCheckBase
+
+    assert Obs4MipsCheckBase.register_checker is False and Obs4MipsCheckBase.ods_version is None
+
+
+def test_a_new_ods_version_overrides_only_what_changed():
+    """The pattern of docs/development/new_ods_version.md: subclass, change one attribute."""
+    from cc_plugin_obs4mips.checks import Obs4MipsCheck_2_6
+
+    class Newer(Obs4MipsCheck_2_6):
+        DOI_REGEX = r"doi:10\.\d{4,9}/\S+"
+
+    old, new = Obs4MipsCheck_2_6.DOI_REGEX, Newer.DOI_REGEX
+    assert new != old and Newer.check_license is Obs4MipsCheck_2_6.check_license  # inherited

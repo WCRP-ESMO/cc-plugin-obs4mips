@@ -12,11 +12,11 @@ import numpy as np
 from netCDF4 import Dataset
 
 from cc_plugin_obs4mips import __version__
-from cc_plugin_obs4mips.checks import unregistered_terms
-from cc_plugin_obs4mips.enums import BUNDLE
+from cc_plugin_obs4mips.checks import Obs4MipsCheck
 
 SUMMARY_SCHEMA = "obs4mips-dataset-summary"
 SUMMARY_SCHEMA_VERSION = "1.0.0"
+BUNDLE = Obs4MipsCheck.bundle()  # CVs of the newest ODS version
 ODS_VERSION = BUNDLE["ods_version"]
 
 
@@ -86,7 +86,7 @@ def _cv_update_candidates(global_attributes: dict[str, Any]) -> dict[str, Any]:
             or not ("allowed" in attr or "patterns" in attr)
         ):
             continue
-        for token, similar in unregistered_terms(name, value):
+        for token, similar in Obs4MipsCheck.unregistered_terms(name, value):
             candidate = {
                 "attribute": name,
                 "collection": attr["cv"]["table"],

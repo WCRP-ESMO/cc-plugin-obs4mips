@@ -10,25 +10,30 @@ The plugin working tree is simple:
 
 ```
 ├── cc_plugin_obs4mips
-│   ├── checks.py
+│   ├── checks
+│   │   ├── base.py  # shared logic (Obs4MipsCheckBase)
+│   │   ├── ods_2_6.py  # ODS 2.6 checks (Obs4MipsCheck_2_6)
+│   │   └── _helpers.py
+│   ├── data/<ods_version>/  # shipped CVs (generated)
+│   ├── cli.py, cv_sync.py
 │   ├── companion_file.py
-│   ├── dataset_summary.py
-│   └── enums.py
-├── cv_sources.json
+│   └── dataset_summary.py
 ├── scripts
 │   └── sync_cvs.py
 
 ```
 
-The `enums.py` file contains enumerations (a set of named constants). The constants include `BUNDLE`, which is a copy of the Obs4MIPs CVs downloaded using `sync_cvs.py` and setting `cv_sources.json` to point to a commit in the `obs4MIPs_CVs` repository.
+The `checks/` package holds the checks. `Obs4MipsCheckBase.bundle()` returns the CVs, built from the copy of the Obs4MIPs CVs in `cc_plugin_obs4mips/data/<ods_version>/` (written by `scripts/sync_cvs.py`, or by `cc-plugin-obs4mips update` for a user).
+
+For a new ODS release, see [new_ods_version.md](new_ods_version.md).
 
 ## Writing a check
 
-The checks in `checks.py` are the style reference; follow them when you add one. The same rules are in `AGENTS.md` for coding agents.
+The checks in `checks/ods_2_6.py` are the style reference; follow them when you add one. The same rules are in `AGENTS.md` for coding agents.
 
 ### Shape
 
-- A check is a method of `Obs4MipsCheck` named `check_*` with the signature `(self, ds)`. `compliance-checker` calls every check as `check(ds)`, so a method without `ds` raises a `TypeError` even if it never uses the dataset. The global attributes are available as `self.attrs`.
+- A check is a method of a check class (`Obs4MipsCheckBase` or an ODS version's subclass) named `check_*` with the signature `(self, ds)`. `compliance-checker` calls every check as `check(ds)`, so a method without `ds` raises a `TypeError` even if it never uses the dataset. The global attributes are available as `self.attrs`.
 - Return a list of `Result` objects, or an empty list when there is nothing to report. Also return an empty list when the attribute is absent and a general check already reports that (see below), so a problem is reported once.
 - Report problems only. Every `Result` has `value=False`; do not add passing results, because the report should show only what the data preparer has to look at.
 - Build results with keyword arguments: `Result(weight=..., value=False, name=..., msgs=[...])`. The `name` is a short group title such as "Filename" or "Time variable". Each message says what is wrong, quotes the offending value with `!r`, and says what is expected.

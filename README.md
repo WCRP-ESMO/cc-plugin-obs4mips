@@ -34,34 +34,41 @@ compliance-checker \
 
 ## Where the rules live
 
-The ODS are maintained in the [`WCRP-ESMO/obs4MIPs_CVs`](https://github.com/WCRP-ESMO/obs4MIPs_CVs) repository, not within the QC tool. This plugin reads them from one generated file, `cc_plugin_obs4mips/cv_data/obs4mips.json`, which contains:
+The ODS are maintained in the [`WCRP-ESMO/obs4MIPs_CVs`](https://github.com/WCRP-ESMO/obs4MIPs_CVs) repository, not within the QC tool. The plugin ships a copy of that repository (term directories, YAML specs, `global_attributes.json`) in `cc_plugin_obs4mips/data/<ods_version>/`, so it works offline, e.g. on web-protected machines. `data/<ods_version>/SOURCE.json` records the commit and the CVs release (`cv_version`) the copy comes from. From it the checker reads:
 
-- every global attribute with its requirement level, condition, separator and allowed values or patterns (from `global_attributes.json` and the CV directories)
+- every global attribute with its requirement level, condition, separator and allowed values or patterns
 - the file name and directory templates (from `drs_specs.yaml`)
-- the CVs commit it was built from (`cvs_ref`)
 
 | To change... | Edit |
 |---|---|
-| an attribute, requirement level, allowed value or DRS part | the CVs repo, then re-sync (below) |
-| a format a regex cannot express (UUID, DOI, URL), or whether a CV mismatch is an error or a warning | `cc_plugin_obs4mips/specs.py` |
-| how a check works (file name, directory, site attributes, ...) | `cc_plugin_obs4mips/checks.py` |
+| an attribute, requirement level, allowed value or DRS part | the CVs repo; the sync (below) brings it here |
+| a format a regex cannot express (UUID, DOI, URL, character sets): a capitalised class attribute | `checks/base.py` (shared) or `checks/ods_<version>.py` |
+| how a check works | `checks/base.py` (generic: presence, CV membership, DRS) or `checks/ods_<version>.py` (attribute-specific) |
+| support a new ODS release | [docs/development/new_ods_version.md](docs/development/new_ods_version.md) |
 
-`obs4mips.json` is generated; do not edit it by hand.
+`data/` is generated; do not edit it by hand (CI checks it against `SOURCE.json`).
 
-### Updating for new CVs or a new ODS release
+### Using other CVs than the shipped ones
 
-1. Merge the change in the CVs repo.
-2. Set `ref` in `cv_sources.json` to the new commit.
-3. Run `uv run python scripts/sync_cvs.py` (add `--source /path/to/obs4MIPs_CVs` to use a local checkout).
-4. Run `uv run pytest -q` and commit the regenerated `obs4mips.json`.
+```bash
+cc-plugin-obs4mips status                       # which CVs are in use
+cc-plugin-obs4mips update                       # latest main of obs4MIPs_CVs
+cc-plugin-obs4mips update some-branch           # a branch, tag or commit
+cc-plugin-obs4mips update --from /path/to/obs4MIPs_CVs   # a local checkout or .tar.gz (offline)
+cc-plugin-obs4mips revert                       # back to the shipped CVs
+```
 
-CI runs `python scripts/sync_cvs.py --check`, which fails if `obs4mips.json` does not match the pinned commit.
+The updated copy is stored per ODS version in your user data directory (set `OBS4MIPS_CV_DIR` to move it). CVs for an ODS version this install has no checker for are stored with a warning.
+
+### Keeping the shipped CVs current
+
+`.github/workflows/sync-cvs.yml` runs daily: it runs `scripts/sync_cvs.py` (follows `main` of the CVs repo), tests the result and opens a PR against `dev`. Merging `dev` into `main` releases a new version (`release.yml`, python-semantic-release from conventional commits; the sync PR uses `fix(data):`). By hand: `uv run python scripts/sync_cvs.py [--ref REF] [--source /path/to/obs4MIPs_CVs]`, then `uv run pytest -q`. `--check` fails if `data/` differs from the commit in `SOURCE.json`.
 
 ### Code layout
 
-- `checks.py`: one checker class. `check_global_attributes_present` and `check_global_attribute_values` loop over the bundle; `check_filename` and `check_directory_structure` build their templates from the DRS in the bundle. The remaining checks need the file itself or several attributes at once.
-- `specs.py`: loads the bundle and holds the few ODS facts the CVs cannot express.
-- `scripts/sync_cvs.py`: builds the bundle.
+- `cv_sync.py`: reads a CVs snapshot into the bundle; `update`, `revert`, `status`. `cli.py` is the `cc-plugin-obs4mips` command.
+- `checks/`: `base.py` (`Obs4MipsCheckBase`, shared logic), `ods_2_6.py` (`Obs4MipsCheck_2_6`), `_helpers.py` (pure functions). One subclass per ODS version.
+- `scripts/sync_cvs.py`: writes the shipped `data/` from the CVs repo.
 - `tests/conftest.py`: `GOOD_VALUES` describes a valid file; tests change one value and check the report.
 
 Companion-file checks (`aux_uncertainty_id`, `external_variables`) are not implemented yet; the design notes are in `docs/planning/companion_files.md`. Plans for CVs versioning and update notifications are in `docs/planning/cvs_caching.md`.

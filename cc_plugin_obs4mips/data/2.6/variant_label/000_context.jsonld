@@ -1,0 +1,9 @@
+{
+    "@context": {
+        "@base":"https://esgvoc.ipsl.fr/resource/universe/variant_label/",
+        "@vocab":"https://esgvoc.ipsl.fr/resource/universe/variant_label/",
+        "id":"@id",
+        "type":"@type",
+        "description":{"@id":"https://schema.org/description"}
+    }
+}

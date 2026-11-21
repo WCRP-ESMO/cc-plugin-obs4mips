@@ -19,7 +19,8 @@ dependencies = [
     "compliance-checker>=6.1.0",
     "netCDF4>=1.6.4",
     "platformdirs>=4.12.4",
-    "pyyaml", # building the CV bundle (obs4mips-update-cvs)
+    "pooch>=1.8",  # downloads the CVs for `cc-plugin-obs4mips update`
+    "pyyaml",  # reads the CVs repo (drs_specs.yaml, esgvoc_manifest.yaml)
 ]
 dynamic = ["version"]
 urls.documentation = "http://ioos.github.io/compliance-checker/"
@@ -28,11 +29,11 @@ urls.repository = "https://github.com/WCRP-ESMO/cc-plugin-obs4mips"
 
 [project.scripts]
 obs4mips-dataset-summary = "cc_plugin_obs4mips.dataset_summary:main"
-obs4mips-update-cvs = "cc_plugin_obs4mips.cv_sync:update_main"
+cc-plugin-obs4mips = "cc_plugin_obs4mips.cli:main"
 
 [project.entry-points."compliance_checker.suites"]
 "obs4mips" = "cc_plugin_obs4mips.checks:Obs4MipsCheck"
-"obs4mips:2.6" = "cc_plugin_obs4mips.checks:Obs4MipsCheck"
+"obs4mips:2.6" = "cc_plugin_obs4mips.checks:Obs4MipsCheck_2_6"
 
 [project.entry-points."compliance_checker.generators"]
 "obs4mips-companion-file" = "cc_plugin_obs4mips.companion_file:Obs4MipsCompanionFileGenerator"
@@ -41,7 +42,7 @@ obs4mips-update-cvs = "cc_plugin_obs4mips.cv_sync:update_main"
 include = ["cc_plugin_obs4mips*"]
 
 [tool.setuptools.package-data]
-cc_plugin_obs4mips = ["cv_data/*.json"]
+cc_plugin_obs4mips = ["data/**/*"]
 
 [tool.setuptools_scm]
 version_file = "cc_plugin_obs4mips/_version.py"
@@ -56,3 +57,15 @@ dev = [
     "pytest-cov",
     "ruff",
 ]
+
+[tool.semantic_release]
+# Version comes from the git tag (setuptools-scm builds from it); semantic-release only tags.
+tag_format = "v{version}"
+commit_parser = "conventional"
+allow_zero_version = true
+major_on_zero = false
+build_command = ""
+
+[tool.ruff.lint]
+# Explicit, so the result does not change when CI installs a newer ruff with new defaults
+select = ["E4", "E7", "E9", "F", "I"]

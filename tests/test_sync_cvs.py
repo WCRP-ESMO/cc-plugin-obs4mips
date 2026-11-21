@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.sync_cvs import build_bundle, read_table
+from cc_plugin_obs4mips.cv_sync import build_bundle, read_table
 
 ATTRIBUTE = {
     "description": "x", "dtype": "string", "separator": None, "requirement": "required",
@@ -53,13 +53,15 @@ def test_missing_collection_is_an_error(tmp_path):
         read_table(tmp_path, "nope", "drs_name")
 
 
-# --- user-updatable bundle and the obs4mips-update-cvs command ---
+# --- shipped and updated snapshots, and the `cc-plugin-obs4mips` command ---
 
-from cc_plugin_obs4mips import cv_sync  # noqa: E402
+from cc_plugin_obs4mips import cli, cv_sync  # noqa: E402
 
 
 def fake_cvs(root, ods_version="2.6"):
     write_term(root, "frequency", "mon", drs_name="mon")
+    (root / "frequency" / "000_context.jsonld").write_text("{}")
+    (root / "esgvoc_manifest.yaml").write_text("cv_version: 9.9.9\n")
     (root / "global_attributes.json").write_text(
         json.dumps({"ods_version": ods_version, "global_attributes": {"frequency": ATTRIBUTE}})
     )
@@ -71,60 +73,96 @@ def fake_cvs(root, ods_version="2.6"):
     return root
 
 
+@pytest.fixture(autouse=True)
+def user_root(tmp_path, monkeypatch):
+    root = tmp_path / "user"
+    monkeypatch.setenv(cv_sync.USER_DIR_ENV, str(root))
+    cv_sync.load_bundle.cache_clear()
+    yield root
+    cv_sync.load_bundle.cache_clear()
+
+
 @pytest.fixture
-def user_bundle(tmp_path, monkeypatch):
-    path = tmp_path / "user" / "obs4mips.json"
-    monkeypatch.setenv(cv_sync.USER_BUNDLE_ENV, str(path))
-    return path
+def cvs(tmp_path, monkeypatch):
+    src = tmp_path / "cvs_src"
+    src.mkdir()
+    monkeypatch.setattr(cv_sync, "resolve_ref", lambda repository, ref: "a" * 40)
+    monkeypatch.setattr(cv_sync, "download", lambda repository, ref, destination: src)
+    return fake_cvs(src)
 
 
-def patch_download(monkeypatch, cvs, sha="a" * 40):
-    monkeypatch.setattr(cv_sync, "resolve_ref", lambda repository, ref: sha)
-    monkeypatch.setattr(cv_sync, "download", lambda repository, ref, destination: cvs)
+def test_every_shipped_snapshot_is_complete_and_named_by_its_ods_version():
+    assert cv_sync.shipped_versions()
+    for ods in cv_sync.shipped_versions():
+        directory = cv_sync.shipped_root() / ods
+        assert cv_sync.ods_version_of(directory) == ods
+        source = cv_sync.read_source(directory)
+        assert len(source["ref"]) == 40 and source["cv_version"]
+        assert cv_sync.build_bundle(directory, source["ref"])["attributes"]
 
 
-def packaged_ods_version():
-    return json.loads(cv_sync.packaged_bundle_text())["ods_version"]
+def test_shipped_cvs_are_used_without_an_update():
+    bundle = cv_sync.load_bundle()
+    assert bundle["source"] == "shipped"
+    assert bundle["ods_version"] == cv_sync.latest_ods_version()
 
 
-def test_load_bundle_is_the_packaged_one_without_an_update(user_bundle):
-    assert cv_sync.load_bundle() == json.loads(cv_sync.packaged_bundle_text())
+def test_update_installs_a_snapshot_that_load_bundle_prefers(cvs, user_root):
+    cv_sync.update(cv_sync.DEFAULT_REPOSITORY, "main")
+    bundle = cv_sync.load_bundle("2.6")
+    assert (bundle["source"], bundle["cvs_ref"], bundle["cv_version"]) == ("updated", "a" * 40, "9.9.9")
+    assert (user_root / "2.6" / "frequency" / "mon.json").is_file()
+    assert (user_root / "2.6" / "SOURCE.json").is_file()
 
 
-def test_update_writes_a_bundle_that_load_bundle_prefers(tmp_path, user_bundle, monkeypatch, capsys):
-    (tmp_path / "cvs_src").mkdir()
-    patch_download(monkeypatch, fake_cvs(tmp_path / "cvs_src", packaged_ods_version()))
-    assert cv_sync.update_main([]) == 0
-    assert cv_sync.load_bundle()["cvs_ref"] == "a" * 40
-    assert "updated CVs" in capsys.readouterr().out
-    assert cv_sync.update_main([]) == 0  # second run changes nothing
-    assert "already up to date" in capsys.readouterr().out
+def test_update_from_a_local_checkout_needs_no_network(cvs, monkeypatch):
+    def offline(*args):
+        raise OSError("no network")
+
+    monkeypatch.setattr(cv_sync, "resolve_ref", offline)
+    monkeypatch.setattr(cv_sync, "download", offline)
+    cv_sync.update(cv_sync.DEFAULT_REPOSITORY, "main", from_path=cvs)
+    assert cv_sync.load_bundle("2.6")["cvs_ref"].startswith("local:")
 
 
-def test_update_refuses_another_ods_version(tmp_path, user_bundle, monkeypatch, capsys):
-    (tmp_path / "cvs_src").mkdir()
-    patch_download(monkeypatch, fake_cvs(tmp_path / "cvs_src", ods_version="99.0"))
-    assert cv_sync.update_main([]) == 1
-    assert not user_bundle.exists() and "ODS 99.0" in capsys.readouterr().err
+def test_update_to_an_unknown_ods_version_is_allowed_with_a_warning(tmp_path, monkeypatch):
+    other = tmp_path / "other"
+    other.mkdir()
+    fake_cvs(other, "9.9")
+    message = cv_sync.update(cv_sync.DEFAULT_REPOSITORY, "main", from_path=other)
+    assert "no checker for ODS 9.9" in message
+    assert cv_sync.load_bundle("2.6")["source"] == "shipped"  # untouched
 
 
-def test_update_failure_leaves_the_existing_bundle_alone(user_bundle, monkeypatch):
+def test_update_failure_changes_nothing(user_root, monkeypatch):
     def offline(repository, ref):
         raise OSError("no network")
 
     monkeypatch.setattr(cv_sync, "resolve_ref", offline)
-    assert cv_sync.update_main([]) == 1
-    assert not user_bundle.exists()
+    with pytest.raises(SystemExit):
+        cv_sync.update(cv_sync.DEFAULT_REPOSITORY, "main")
+    assert not user_root.exists()
 
 
-def test_broken_user_bundle_is_ignored_with_a_warning(user_bundle, capsys):
-    user_bundle.parent.mkdir(parents=True)
-    user_bundle.write_text("{not json")
-    assert cv_sync.load_bundle() == json.loads(cv_sync.packaged_bundle_text())
+def test_unreadable_snapshot_is_ignored_with_a_warning(user_root, capsys):
+    (user_root / "2.6").mkdir(parents=True)
+    (user_root / "2.6" / "SOURCE.json").write_text("{not json")
+    assert cv_sync.load_bundle("2.6")["source"] == "shipped"
     assert "ignoring updated CVs" in capsys.readouterr().err
 
 
-def test_reset_removes_the_user_bundle(user_bundle, capsys):
-    user_bundle.parent.mkdir(parents=True)
-    user_bundle.write_text("{}")
-    assert cv_sync.update_main(["--reset"]) == 0 and not user_bundle.exists()
+def test_revert_removes_updated_snapshots(cvs, user_root):
+    cv_sync.update(cv_sync.DEFAULT_REPOSITORY, "main")
+    assert "reverted" in cv_sync.revert()
+    assert not (user_root / "2.6").exists()
+    assert cv_sync.load_bundle("2.6")["source"] == "shipped"
+    assert "nothing to revert" in cv_sync.revert()
+
+
+def test_cli_status_update_revert(cvs, capsys):
+    assert cli.main(["update"]) == 0
+    assert cli.main(["status"]) == 0
+    assert "using updated CVs" in capsys.readouterr().out
+    assert cli.main(["revert"]) == 0
+    assert cli.main(["status"]) == 0
+    assert "using shipped CVs" in capsys.readouterr().out

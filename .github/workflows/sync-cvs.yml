@@ -1,0 +1,51 @@
+name: sync CVs
+
+# Keeps the CVs shipped in cc_plugin_obs4mips/data in step with obs4MIPs_CVs `main`:
+# daily (and on demand), run scripts/sync_cvs.py and open a PR against `dev` if it changed.
+# Merging that PR into `dev`, and later `dev` into `main`, releases it (see release.yml).
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: python -m pip install uv && uv sync --dev
+      - name: Sync the shipped CVs
+        run: uv run python scripts/sync_cvs.py
+      - name: Run the tests on the new CVs
+        run: uv run pytest -q
+      - name: Open a PR if the CVs changed
+        env:
+          # PRs opened with the default GITHUB_TOKEN do not start other workflows
+          # (tests.yml); set the CVS_SYNC_TOKEN secret (PAT or GitHub App token) to get them.
+          GH_TOKEN: ${{ secrets.CVS_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$(git status --porcelain cc_plugin_obs4mips/data)" ]; then
+            echo "CVs are up to date"; exit 0
+          fi
+          SHA=$(python -c "import json,glob;print(json.load(open(sorted(glob.glob('cc_plugin_obs4mips/data/*/SOURCE.json'))[-1]))['ref'][:7])")
+          BRANCH="chore/sync-cvs-$SHA"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add cc_plugin_obs4mips/data
+          git commit -m "fix(data): sync CVs to obs4MIPs_CVs $SHA"
+          git push -u origin "$BRANCH"
+          gh pr create --base dev --head "$BRANCH" \
+            --title "fix(data): sync CVs to obs4MIPs_CVs $SHA" \
+            --body "Automated by sync-cvs.yml: runs scripts/sync_cvs.py on obs4MIPs_CVs main. Tests passed on this snapshot."

@@ -9,12 +9,16 @@ governing rule:
 
 ## Quick reference
 
-- `cc_plugin_obs4mips/cv_data/obs4mips.json` — **generated** by `scripts/sync_cvs.py` from
-  the CVs commit pinned in `cv_sources.json`. Never edit by hand. It holds the global
-  attributes (requirement, condition, separator, allowed values, patterns) and the DRS.
-- `cc_plugin_obs4mips/enums.py` — loads the bundle (`BUNDLE`) and holds the few facts the
-  CVs cannot express (`FREQUENCY_TIME_DIGITS`, `VERSION_REGEX`, ...).
-- `cc_plugin_obs4mips/checks.py` — one checker class (`Obs4MipsCheck`). The general
+- `cc_plugin_obs4mips/data/<ods_version>/` — **generated** copy of the CVs repo (term
+  directories, YAML specs, `global_attributes.json`, `SOURCE.json` with the commit and
+  `cv_version`), written by `scripts/sync_cvs.py` (a daily workflow opens a PR against `dev`).
+  Never edit by hand. `cv_sync.load_bundle()` turns it into the dict the checks use; a
+  user's `cc-plugin-obs4mips update` copy wins over it until `revert`.
+- `cc_plugin_obs4mips/checks/` — `base.py` has `Obs4MipsCheckBase` (setup, requirement levels,
+  presence, CV membership, DRS) and the rules the CVs cannot express as capitalised class
+  attributes (`DOI_REGEX`, `FREQUENCY_TIME_DIGITS`, ...); `ods_2_6.py` has `Obs4MipsCheck_2_6`.
+  A new ODS release is a subclass: see `docs/development/new_ods_version.md`.
+- `cc_plugin_obs4mips/checks/` — see above (`Obs4MipsCheckBase`, `Obs4MipsCheck_2_6`). The general
   checks loop over the bundle (`check_global_attribute_presence`,
   `check_global_attribute_cvs`), `check_drs_filename` / `check_drs_directory` build their
   templates from the DRS, and the rest are attribute-specific or need the dataset.
@@ -32,13 +36,14 @@ Python ≥ 3.10 is supported and CI runs 3.10: avoid newer syntax and stdlib.
 
 ## Rules specific to this repo
 
-- Don't add a new ODS fact to `enums.py` or `checks.py` if it can live in the CVs repo.
-  Put it there, bump the pin, re-sync. What remains in `enums.py` is the project's
+- Don't add a new ODS fact to the check classes if it can live in the CVs repo.
+  Put it there, re-sync. What remains in those class attributes is the project's
   documented exception (formats a regex cannot express, one place only).
 - Keep it small: prefer a loop over the bundle to a new function or class. A maintainer
-  with basic Python should be able to follow `checks.py` top to bottom.
-- Any change that depends on newer CVs content bumps `ref` in `cv_sources.json`, re-runs
-  `sync_cvs.py`, and commits the regenerated `obs4mips.json`.
+  with basic Python should be able to follow `checks/` top to bottom.
+- Any change that depends on newer CVs content re-runs `scripts/sync_cvs.py` (or
+  `--ref <branch>`) and commits the regenerated `data/`. Work goes to `dev`; merging `dev`
+  into `main` releases (python-semantic-release, conventional commits).
 - Add a test for every new check or rule: a change to `GOOD_VALUES` that makes the check
   fail, and the expected message.
 - Not implemented yet, with design notes in `docs/planning/`: companion-file checks (`companion_files.md`) and CVs update notifications (`cvs_caching.md`).
@@ -50,7 +55,7 @@ Python ≥ 3.10 is supported and CI runs 3.10: avoid newer syntax and stdlib.
 
 ## How to write a check (formatting guide)
 
-Follow the existing checks in `checks.py`; they are the style reference.
+Follow the existing checks in `checks/ods_2_6.py`; they are the style reference.
 
 **Shape**
 - A check is a method named `check_*` with the signature `(self, ds)`. Compliance Checker
