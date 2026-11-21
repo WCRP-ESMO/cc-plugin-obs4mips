@@ -6,6 +6,7 @@ value (or drops an attribute) and checks that exactly the expected problem is re
 """
 
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -21,15 +22,21 @@ GOOD_VALUES = {
     "creation_date": "2025-01-01T00:00:00Z",
     "data_specs_version": "2.6.1",
     "dataset_contributor": "Jane Doe",
-    "doi": "10.5281/zenodo.1234567",
+    "doi": "https://doi.org/10.5281/zenodo.1234567",
     "frequency": "mon",
-    "grid": "native grid",
+    "grid": "native 2 x 2 degree grid",
     "grid_label": "gn",
     "has_aux_unc": "FALSE",
     "institution": "Oakridge National Laboratory, TN, USA",
     "institution_id": "ORNL",
-    "license": "Data are licensed under a Creative Commons Attribution 4.0 International License",
-    "nominal_resolution": "100 km",
+    "license": (
+        "Data in this file produced by ORNL is licensed under a Creative Commons "
+        "Attribution 4.0 International License (https://creativecommons.org/licenses/). "
+        "Use of the data must be acknowledged following guidelines found at "
+        "https://example.org/acknowledgement. Further information about this data, "
+        "including some limitations, can be found via https://example.org/about."
+    ),
+    "nominal_resolution": "250 km",
     "processing_code_location": "https://github.com/WCRP-ESMO/obs4MIPs/blob/0123456789abcdef/examples/run.py",
     "product": "reanalysis",
     "realm": "atmos",
@@ -47,6 +54,9 @@ GOOD_VALUES = {
     "variant_info": "Best estimate",
     "variant_label": "BE",
 }
+
+# A regular 2 x 2 degree global grid: its mean resolution is about 286 km ("250 km")
+GOOD_COORDS = (np.arange(-89.0, 90.0, 2.0), np.arange(1.0, 360.0, 2.0))
 
 # File location and name that agree with GOOD_VALUES
 GOOD_DIRECTORY = "obs4MIPs/ORNL/20CR-V3/mon/tas/gn/v20250101"
@@ -68,20 +78,39 @@ def run_check(tmp_path, monkeypatch):
       filename=...      replace GOOD_FILENAME
       time_values=...   replace the time axis (days since 2000-01-01)
       time_name=...     name of the time variable (default "time")
+      time_axis=...     axis attribute of the time variable (default "T"; None omits it)
+      coords=...        (latitude centers, longitude centers) written as 1-D coordinates
+                        (default GOOD_COORDS; None writes no latitude/longitude)
+      creation_date     defaults to now, so it agrees with the file's modification time
       anything else     is a global attribute value
     """
     monkeypatch.chdir(tmp_path)  # relative paths: the directory checks see only what we write
 
     def run(method, *, drop=(), directory=GOOD_DIRECTORY, filename=GOOD_FILENAME,
-            time_values=(15.0, 45.0), time_name="time", **changes):  # fmt: skip
+            time_values=(15.0, 45.0), time_name="time", time_axis="T",
+            coords=GOOD_COORDS, **changes):  # fmt: skip
         values = {**GOOD_VALUES, **changes}
+        if "creation_date" not in changes:  # the file is created now
+            values["creation_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         path = Path(directory) / filename
         path.parent.mkdir(parents=True, exist_ok=True)
         with Dataset(path, "w") as ds:
             ds.createDimension("time", len(time_values))
             time = ds.createVariable(time_name, "f8", ("time",))
             time.units, time.calendar = "days since 2000-01-01", "standard"
+            time.standard_name = "time"
+            if time_axis:
+                time.axis = time_axis
             time[:] = np.array(time_values)
+            if coords is not None:  # (latitude centers, longitude centers) in degrees
+                for name, centers, std, units, axis in zip(
+                    ("lat", "lon"), coords, ("latitude", "longitude"),
+                    ("degrees_north", "degrees_east"), ("Y", "X"),
+                ):  # fmt: skip
+                    ds.createDimension(name, len(centers))
+                    coord = ds.createVariable(name, "f8", (name,))
+                    coord.standard_name, coord.units, coord.axis = std, units, axis
+                    coord[:] = centers
             variable = ds.createVariable(values["variable_id"], "f4", ("time",))
             variable.units = "K"
             if "units_metadata" in values:
