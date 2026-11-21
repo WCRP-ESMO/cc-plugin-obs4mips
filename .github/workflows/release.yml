@@ -26,6 +26,9 @@ jobs:
         uses: python-semantic-release/python-semantic-release@v9
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Only tag and release: no "chore(release)" commit, which the branch ruleset
+          # (changes must go through a pull request) would reject.
+          commit: "false"
       - uses: actions/setup-python@v5
         if: steps.semrel.outputs.released == 'true'
         with:
