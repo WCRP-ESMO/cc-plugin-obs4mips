@@ -8,99 +8,23 @@ The bundle is the only place where the checker gets ODS facts from. It holds:
   - the DRS part lists from drs_specs.yaml
 
 To update: change `ref` in cv_sources.json, run this script, run the tests.
-Never edit the bundle by hand.
+Never edit the bundle by hand. The logic lives in cc_plugin_obs4mips/cv_sync.py, which
+also powers the user-facing `obs4mips-update-cvs` command.
 """
 
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import sys
-import tarfile
 import tempfile
-import urllib.request
 from pathlib import Path
 
-import yaml  # only needed here, not by the checker at runtime
+from cc_plugin_obs4mips.cv_sync import build_bundle, bundle_text, download, read_table  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = ROOT / "cv_sources.json"
 BUNDLE = ROOT / "cc_plugin_obs4mips" / "cv_data" / "obs4mips.json"
-
-
-def download(repository: str, ref: str, destination: Path) -> Path:
-    """Download a GitHub tarball of `ref` and return the extracted repo directory."""
-    path = repository.removeprefix("https://github.com/").removesuffix(".git")
-    url = f"https://codeload.github.com/{path}/tar.gz/{ref}"
-    with urllib.request.urlopen(url, timeout=60) as response:
-        archive = response.read()
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
-        for member in tar.getmembers():
-            parts = Path(member.name).parts
-            if Path(member.name).is_absolute() or ".." in parts or member.issym() or member.islnk():
-                raise SystemExit(f"unsafe path in archive: {member.name}")
-        if sys.version_info >= (3, 12):
-            tar.extractall(destination, filter="data")
-        else:
-            tar.extractall(destination)
-    (root,) = [p for p in destination.iterdir() if p.is_dir()]
-    return root
-
-
-def read_table(cvs: Path, table: str, key: str | None) -> dict:
-    """Read one CV directory: regex terms give `patterns`, other terms give `allowed`.
-
-    `key` is the term field holding the value (drs_name, description, ...). It is null
-    for free-text tables, which then have no `allowed` list.
-    """
-    if not (cvs / table).is_dir():
-        raise SystemExit(f"CV directory not found: {cvs / table}")
-    allowed, patterns, skipped = [], [], 0
-    for file in sorted((cvs / table).glob("*.json")):
-        term = json.loads(file.read_text(encoding="utf-8"))
-        if "regex" in term:
-            patterns.append(term["regex"])
-        elif key and term.get(key):
-            allowed.append(term[key])
-        elif key:
-            skipped += 1  # e.g. the empty variable_id stubs kept in the CVs; they never match
-    if skipped:
-        print(f"note: {table}: skipped {skipped} term(s) with no {key!r}", file=sys.stderr)
-    result = {}
-    if allowed:
-        result["allowed"] = sorted(allowed)
-    if patterns:
-        result["patterns"] = patterns
-    return result
-
-
-def build_bundle(cvs: Path, ref: str) -> dict:
-    spec = json.loads((cvs / "global_attributes.json").read_text(encoding="utf-8"))
-    attributes = {}
-    for name, attr in spec["global_attributes"].items():
-        attributes[name] = dict(attr)
-        if attr["cv"]:
-            attributes[name].update(read_table(cvs, attr["cv"]["table"], attr["cv"]["key"]))
-
-    drs_specs = yaml.safe_load((cvs / "drs_specs.yaml").read_text(encoding="utf-8"))
-    drs = {}
-    for name in ("directory", "file_name", "dataset_id"):
-        drs[name] = {
-            "separator": drs_specs[name]["separator"],
-            "parts": [
-                {"name": p["source_collection"], "required": p["is_required"]}
-                for p in drs_specs[name]["parts"]
-            ],
-        }
-    drs["file_name"]["extension"] = drs_specs["file_name"]["properties"]["extension"]
-
-    return {
-        "ods_version": spec["ods_version"],
-        "cvs_ref": ref,
-        "attributes": attributes,
-        "drs": drs,
-    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -114,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     ref = args.ref or sources["ref"]
     with tempfile.TemporaryDirectory(prefix="obs4mips-cvs-") as tmp:
         cvs = args.source or download(sources["repository"], ref, Path(tmp))
-        text = json.dumps(build_bundle(cvs, ref), indent=2) + "\n"
+        text = bundle_text(build_bundle(cvs, ref))
 
     current = BUNDLE.read_text(encoding="utf-8") if BUNDLE.exists() else None
     if args.check:

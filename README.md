@@ -1,5 +1,5 @@
 # obs4MIPs Compliance Checker
-This is a Python tool that checks if a NetCDF dataset complies with the obs4MIPs data standard (ODS) version 2.6.1. It is a plug-in for the [IOOS Compliance Checker](https://github.com/ioos/compliance-checker). The tool evaluates the dataset against the ODS specifications and generates a report indicating whether the dataset is compliant and lists any issues found. This step is necessary before adding the dataset information to the [obs4MIPs_CVs repository](https://github.com/WCRP-ESMO/obs4MIPs-cmor-tables) and before submitting the dataset to ESGF.
+This is a Python tool that checks if a NetCDF dataset complies with the most recent Obs4MIPs Data Specifications (ODS). It is a plug-in for the [IOOS Compliance Checker](https://github.com/ioos/compliance-checker). The tool evaluates a NetCDF file against ODS specifications and generates a report detailing optional changes, recommended changes, and required changes. The report must not have any required changes before NetCDFs can be accepted and submitted to ESGF under the Obs4MIPs project.
 
 ## Installation
 To install the obs4MIPs Compliance Checker, create a virtual environment (we recommend using `uv`) and install the package using pip:
@@ -20,27 +20,9 @@ compliance-checker -t obs4mips [dataset.nc]
 
 Replace `[dataset.nc]` with the path to your NetCDF dataset. The tool will output a report indicating whether the dataset is compliant with the obs4MIPs data standard and will list any issues found. See the [IOOS Compliance Checker documentation](https://ioos.github.io/compliance-checker/) for additional usage notes and options.
 
-To select the ODS release explicitly, use:
+## Tool Artifacts
 
-```bash
-compliance-checker -t obs4mips [dataset.nc]
-```
-
-When checking one primary file, supply directly related uncertainty or cell-measure NetCDF files with a repeatable companion option:
-
-```bash
-compliance-checker \
-  -t obs4mips \
-  [dataset.nc] \
-  --companion-file [uncertainty.nc] \
-  --companion-file [cell-measure.nc]
-```
-
-Repeat `--companion-file FILE` to provide multiple files. The checker does not search the filesystem; it checks only the primary file and the companions supplied by the user. Use `json_new`, rather than `json`, when requesting JSON output for the resulting multi-file check.
-
-## Issue submission artifacts
-
-Create a human-readable Compliance Checker report and a separate machine-readable JSON summary of the NetCDF header for attachment to an issue:
+You can export the report as a text file to share with others:
 
 ```bash
 compliance-checker \
@@ -48,19 +30,11 @@ compliance-checker \
   -f text \
   -o compliance-report.txt \
   [dataset.nc]
-
-obs4mips-dataset-summary \
-  -o dataset-summary.json \
-  [dataset.nc]
 ```
-
-The dataset summary is a parseable equivalent of `ncdump -h`. It includes the filename and file format, every global attribute, dimensions and unlimited status, coordinate metadata, and data-variable metadata. It deliberately excludes array values and the submitter's absolute local path. The top-level `schema_version` field provides a stable contract for scripts that process issue attachments.
-
-When a submitted value is not registered in a packaged controlled vocabulary, the text report asks the submitter to check for an appropriate existing term and shows similar registered values. The JSON summary records the same values under `cv_update_candidates`, along with the target collection, membership field, pinned CV source, and pointers to the dataset metadata needed by an automated CV repository updater.
 
 ## Where the rules live
 
-The Obs4MIPs Data Specifications (ODS) are maintained in the [`WCRP-ESMO/obs4MIPs_CVs`](https://github.com/WCRP-ESMO/obs4MIPs_CVs) repository, not here. This plugin reads them from one generated file, `cc_plugin_obs4mips/cv_data/obs4mips.json`, which contains:
+The ODS are maintained in the [`WCRP-ESMO/obs4MIPs_CVs`](https://github.com/WCRP-ESMO/obs4MIPs_CVs) repository, not within the QC tool. This plugin reads them from one generated file, `cc_plugin_obs4mips/cv_data/obs4mips.json`, which contains:
 
 - every global attribute with its requirement level, condition, separator and allowed values or patterns (from `global_attributes.json` and the CV directories)
 - the file name and directory templates (from `drs_specs.yaml`)

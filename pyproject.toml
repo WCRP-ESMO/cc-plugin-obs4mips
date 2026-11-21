@@ -18,6 +18,8 @@ requires-python = ">=3.10"
 dependencies = [
     "compliance-checker>=6.1.0",
     "netCDF4>=1.6.4",
+    "platformdirs>=4.12.4",
+    "pyyaml", # building the CV bundle (obs4mips-update-cvs)
 ]
 dynamic = ["version"]
 urls.documentation = "http://ioos.github.io/compliance-checker/"
@@ -26,6 +28,7 @@ urls.repository = "https://github.com/WCRP-ESMO/cc-plugin-obs4mips"
 
 [project.scripts]
 obs4mips-dataset-summary = "cc_plugin_obs4mips.dataset_summary:main"
+obs4mips-update-cvs = "cc_plugin_obs4mips.cv_sync:update_main"
 
 [project.entry-points."compliance_checker.suites"]
 "obs4mips" = "cc_plugin_obs4mips.checks:Obs4MipsCheck"
@@ -51,6 +54,5 @@ fallback_version = "0.0.0"
 dev = [
     "pytest",
     "pytest-cov",
-    "pyyaml",  # scripts/sync_cvs.py only
     "ruff",
 ]
