@@ -3,13 +3,13 @@ import json
 import numpy as np
 from netCDF4 import Dataset
 
+from cc_plugin_obs4mips.checks import Obs4MipsCheck
 from cc_plugin_obs4mips.dataset_summary import (
     SUMMARY_SCHEMA,
     SUMMARY_SCHEMA_VERSION,
     main,
     summarize_dataset,
 )
-from cc_plugin_obs4mips.checks import Obs4MipsCheck
 
 BUNDLE = Obs4MipsCheck.bundle()
 

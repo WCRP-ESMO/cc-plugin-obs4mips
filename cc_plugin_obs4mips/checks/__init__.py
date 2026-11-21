@@ -9,9 +9,9 @@ docs/development/new_ods_version.md.
 """
 
 from cc_plugin_obs4mips.checks._helpers import (
+    _nominal_resolution_km,
     mean_resolution_km,
     nominal_resolutions_km,
-    _nominal_resolution_km,
 )
 from cc_plugin_obs4mips.checks.base import ODS_WEIGHT, Obs4MipsCheckBase
 from cc_plugin_obs4mips.checks.ods_2_6 import Obs4MipsCheck_2_6
