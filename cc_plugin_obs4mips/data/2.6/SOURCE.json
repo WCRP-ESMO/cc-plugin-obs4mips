@@ -1,0 +1,6 @@
+{
+  "_generated_by": "scripts/sync_cvs.py or `cc-plugin-obs4mips update`; do not edit by hand",
+  "repository": "https://github.com/WCRP-ESMO/obs4MIPs_CVs",
+  "ref": "96b5587b31cb89da0737a88613be0633cd523d5d",
+  "cv_version": "1.1.0"
+}

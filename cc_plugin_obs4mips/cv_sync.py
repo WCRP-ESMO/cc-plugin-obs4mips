@@ -1,28 +1,25 @@
 """
-Build, store and load the CVs bundle (the only place the checker gets ODS facts from).
+Where the checker gets ODS facts from: a snapshot of the obs4MIPs_CVs repository.
 
-The bundle holds:
-  - every entry of global_attributes.json (requirement, conditional, separator, ...)
-  - for attributes with a CV: `allowed` (registered CV terms) and/or `patterns`
-    (regex-based terms)
-  - the DRS part lists from drs_specs.yaml
+Two kinds of snapshot exist, one directory per ODS version (named like the
+`ods_version` of `global_attributes.json`, e.g. `2.6`):
+  - the shipped one, `cc_plugin_obs4mips/data/<ods_version>/`, written by
+    `scripts/sync_cvs.py` (developers and CI; never edit it by hand);
+  - an updated one, written by `cc-plugin-obs4mips update` into the user's data directory.
+    It wins over the shipped one until `cc-plugin-obs4mips revert` removes it.
 
-Two copies can exist:
-  - the packaged one, `cv_data/obs4mips.json`, written by `scripts/sync_cvs.py` from the
-    ref pinned in `cv_sources.json` (developers; never edit by hand);
-  - a user one, written by the `obs4mips-update-cvs` command into the user's data
-    directory. It wins over the packaged one when it is valid and for the same ODS
-    version, so users can update the CVs without reinstalling the tool.
+A snapshot holds the term directories, the `*.yaml` specs, `global_attributes.json` and a
+`SOURCE.json` saying which commit it is. `load_bundle()` reads a snapshot into the dict
+that `checks.py` uses (every global attribute plus its allowed terms, and the DRS).
 """
 
 from __future__ import annotations
 
-import argparse
-import io
+import functools
 import json
 import os
+import shutil
 import sys
-import tarfile
 import tempfile
 import urllib.request
 from importlib.resources import files
@@ -31,13 +28,12 @@ from pathlib import Path
 from platformdirs import user_data_path
 
 DEFAULT_REPOSITORY = "https://github.com/WCRP-ESMO/obs4MIPs_CVs"
-DEFAULT_REF = "main"  # branch or tag or commit that `obs4mips-update-cvs` follows
-USER_BUNDLE_ENV = (
-    "OBS4MIPS_CV_BUNDLE"  # full path of the user bundle; overrides the default
-)
+DEFAULT_REF = "main"  # branch, tag or commit that `update` and the sync follow
+USER_DIR_ENV = "OBS4MIPS_CV_DIR"  # root of the updated snapshots; overrides the default
+GENERATED_BY = "scripts/sync_cvs.py or `cc-plugin-obs4mips update`; do not edit by hand"
 
 
-# Building the bundle from an obs4MIPs_CVs checkout ------------------------------------
+# Getting a snapshot ---------------------------------------------------------------------
 
 
 def _github_path(repository: str) -> str:
@@ -55,26 +51,71 @@ def resolve_ref(repository: str, ref: str) -> str:
 
 
 def download(repository: str, ref: str, destination: Path) -> Path:
-    """Download a GitHub tarball of `ref` and return the extracted repo directory."""
+    """Download the GitHub tarball of `ref` (pooch) and return the extracted repo directory."""
+    import pooch  # imported here so that running the checker does not need it
+
+    pooch.get_logger().setLevel("WARNING")  # no download chatter
     url = f"https://codeload.github.com/{_github_path(repository)}/tar.gz/{ref}"
-    with urllib.request.urlopen(url, timeout=60) as response:
-        archive = response.read()
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
-        for member in tar.getmembers():
-            parts = Path(member.name).parts
-            if (
-                Path(member.name).is_absolute()
-                or ".." in parts
-                or member.issym()
-                or member.islnk()
-            ):
-                raise SystemExit(f"unsafe path in archive: {member.name}")
-        if sys.version_info >= (3, 12):
-            tar.extractall(destination, filter="data")
-        else:
-            tar.extractall(destination)
-    (root,) = [p for p in destination.iterdir() if p.is_dir()]
+    pooch.retrieve(
+        url,
+        known_hash=None,
+        path=destination,
+        fname="cvs.tar.gz",
+        processor=pooch.Untar(),
+        progressbar=False,
+    )
+    (root,) = [p for p in (destination / "cvs.tar.gz.untar").iterdir() if p.is_dir()]
     return root
+
+
+def read_source(directory: Path) -> dict:
+    return json.loads((directory / "SOURCE.json").read_text(encoding="utf-8"))
+
+
+def cv_version_of(cvs: Path) -> str | None:
+    """`cv_version` of esgvoc_manifest.yaml: the CVs release (not the ODS version)."""
+    import yaml
+
+    manifest = cvs / "esgvoc_manifest.yaml"
+    if not manifest.is_file():
+        return None
+    version = yaml.safe_load(manifest.read_text(encoding="utf-8")).get("cv_version")
+    return None if version is None else str(version)
+
+
+def ods_version_of(cvs: Path) -> str:
+    return json.loads((cvs / "global_attributes.json").read_text(encoding="utf-8"))[
+        "ods_version"
+    ]
+
+
+def snapshot(cvs: Path, destination: Path, repository: str, ref: str) -> None:
+    """Copy what the checker needs from a CVs checkout into `destination` (replaced)."""
+    staging = destination.with_name(destination.name + ".tmp")
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    try:
+        for file in sorted([*cvs.glob("*.yaml"), *cvs.glob("global_attributes*.json")]):
+            shutil.copy2(file, staging / file.name)
+        for directory in sorted(p for p in cvs.iterdir() if p.is_dir()):
+            if (directory / "000_context.jsonld").is_file():  # a CV directory
+                shutil.copytree(directory, staging / directory.name)
+        source = {
+            "_generated_by": GENERATED_BY,
+            "repository": repository,
+            "ref": ref,
+            "cv_version": cv_version_of(cvs),
+        }
+        (staging / "SOURCE.json").write_text(
+            json.dumps(source, indent=2) + "\n", encoding="utf-8"
+        )
+        shutil.rmtree(destination, ignore_errors=True)
+        os.replace(staging, destination)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+# Reading a snapshot ---------------------------------------------------------------------
 
 
 def read_table(cvs: Path, table: str, key: str | None) -> dict:
@@ -109,7 +150,7 @@ def read_table(cvs: Path, table: str, key: str | None) -> dict:
 
 
 def build_bundle(cvs: Path, ref: str) -> dict:
-    import yaml  # imported here so that running the checker does not need it
+    import yaml
 
     spec = json.loads((cvs / "global_attributes.json").read_text(encoding="utf-8"))
     attributes = {}
@@ -135,156 +176,133 @@ def build_bundle(cvs: Path, ref: str) -> dict:
     return {
         "ods_version": spec["ods_version"],
         "cvs_ref": ref,
+        "cv_version": cv_version_of(cvs),
         "attributes": attributes,
         "drs": drs,
     }
 
 
-def bundle_text(bundle: dict) -> str:
-    return json.dumps(bundle, indent=2) + "\n"
+# Which snapshot is used -----------------------------------------------------------------
 
 
-# Where the bundles live, and which one is used ----------------------------------------
+def _version_key(version: str) -> tuple:
+    return tuple(int(part) if part.isdigit() else 0 for part in version.split("."))
 
 
-def packaged_bundle_text() -> str:
-    return (
-        files("cc_plugin_obs4mips")
-        .joinpath("cv_data/obs4mips.json")
-        .read_text(encoding="utf-8")
-    )
+def shipped_root() -> Path:
+    return Path(str(files("cc_plugin_obs4mips").joinpath("data")))
 
 
-def user_bundle_path() -> Path:
-    if env := os.environ.get(USER_BUNDLE_ENV):
+def user_root() -> Path:
+    if env := os.environ.get(USER_DIR_ENV):
         return Path(env)
-    return (
-        user_data_path("cc-plugin-obs4mips", appauthor=False, roaming=True)
-        / "obs4mips.json"
-    )
+    return user_data_path("cc-plugin-obs4mips", appauthor=False, roaming=True) / "cvs"
 
 
-def load_bundle() -> dict:
-    """Return the user bundle when it is valid and for the same ODS version, else the packaged one."""
-    packaged = json.loads(packaged_bundle_text())
-    path = user_bundle_path()
-    if not path.is_file():
-        return packaged
-    try:
-        user = json.loads(path.read_text(encoding="utf-8"))
-        missing = {"ods_version", "cvs_ref", "attributes", "drs"} - set(user)
-        if missing:
-            raise ValueError(f"missing keys {sorted(missing)}")
-        if user["ods_version"] != packaged["ods_version"]:
-            raise ValueError(
-                f"it is for ODS {user['ods_version']} but this install checks ODS {packaged['ods_version']}"
+def shipped_versions() -> list[str]:
+    """ODS versions this install carries CVs for, oldest first."""
+    root = shipped_root()
+    versions = [p.name for p in root.iterdir() if (p / "SOURCE.json").is_file()]
+    return sorted(versions, key=_version_key)
+
+
+def latest_ods_version() -> str:
+    return shipped_versions()[-1]
+
+
+def _read_snapshot(directory: Path) -> dict:
+    return build_bundle(directory, read_source(directory)["ref"])
+
+
+@functools.cache
+def load_bundle(ods_version: str | None = None) -> dict:
+    """The bundle of an ODS version (default: the newest): updated snapshot if valid, else shipped."""
+    ods_version = ods_version or latest_ods_version()
+    shipped = shipped_root() / ods_version
+    if not (shipped / "SOURCE.json").is_file():
+        raise SystemExit(
+            f"cc-plugin-obs4mips has no CVs for ODS {ods_version} "
+            f"(available: {', '.join(shipped_versions())})"
+        )
+    updated = user_root() / ods_version
+    if (updated / "SOURCE.json").is_file():
+        try:
+            bundle = _read_snapshot(updated)
+        except (OSError, KeyError, ValueError, SystemExit) as error:
+            print(
+                f"cc-plugin-obs4mips: ignoring updated CVs in {updated} ({error!r}); "
+                "using the shipped CVs. Run 'cc-plugin-obs4mips revert' to remove them.",
+                file=sys.stderr,
             )
-    except (OSError, ValueError) as error:  # json.JSONDecodeError is a ValueError
-        print(
-            f"cc-plugin-obs4mips: ignoring updated CVs in {path} ({error}); using the packaged CVs. "
-            "Run 'obs4mips-update-cvs --reset' to remove the file.",
-            file=sys.stderr,
-        )
-        return packaged
-    return user
+        else:
+            return {**bundle, "source": "updated"}
+    return {**_read_snapshot(shipped), "source": "shipped"}
 
 
-# ---------------------------------------------------------------------------
-# The `obs4mips-update-cvs` command
-# ---------------------------------------------------------------------------
+# Commands (used by cli.py) --------------------------------------------------------------
 
 
-def _write_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".obs4mips-", suffix=".tmp")
+def update(repository: str, ref: str, from_path: Path | None = None) -> str:
+    """Install a snapshot into the user's data directory; return a message."""
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
-
-
-def update_main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="obs4mips-update-cvs",
-        description="Download the latest obs4MIPs CVs and use them instead of the ones packaged with this tool.",
-    )
-    parser.add_argument(
-        "--repository", default=DEFAULT_REPOSITORY, help="GitHub repository of the CVs"
-    )
-    parser.add_argument(
-        "--ref",
-        default=DEFAULT_REF,
-        help=f"branch, tag or commit to follow (default: {DEFAULT_REF})",
-    )
-    parser.add_argument(
-        "--status", action="store_true", help="show which CVs are in use and exit"
-    )
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="delete the updated CVs and go back to the packaged ones",
-    )
-    args = parser.parse_args(argv)
-
-    path = user_bundle_path()
-    packaged = json.loads(packaged_bundle_text())
-
-    if args.status:
-        in_use = load_bundle()
-        source = "packaged" if in_use == packaged else "updated"
-        print(
-            f"in use: {source} CVs, ODS {in_use['ods_version']}, commit {in_use['cvs_ref']}"
-        )
-        print(f"packaged: commit {packaged['cvs_ref']}")
-        print(f"updated copy: {path if path.is_file() else 'none'}")
-        return 0
-
-    if args.reset:
-        path.unlink(missing_ok=True)
-        print(f"removed {path}; using the packaged CVs (commit {packaged['cvs_ref']})")
-        return 0
-
-    try:
-        sha = resolve_ref(args.repository, args.ref)
         with tempfile.TemporaryDirectory(prefix="obs4mips-cvs-") as tmp:
-            cvs = download(args.repository, sha, Path(tmp))
-            bundle = build_bundle(cvs, sha)
+            tmp = Path(tmp)
+            if from_path is None:
+                sha = resolve_ref(repository, ref)
+                cvs, source_ref, origin = download(repository, sha, tmp), sha, ref
+            elif from_path.is_dir():
+                cvs, source_ref, origin = from_path, f"local:{from_path}", str(from_path)
+            else:
+                shutil.unpack_archive(from_path, tmp)
+                (cvs,) = [p for p in tmp.iterdir() if p.is_dir()]
+                source_ref, origin = f"local:{from_path.name}", str(from_path)
+            build_bundle(cvs, source_ref)  # fail now if the CVs cannot be read
+            ods = ods_version_of(cvs)
+            destination = user_root() / ods
+            snapshot(cvs, destination, repository, source_ref)
     except OSError as error:  # urllib.error.URLError is an OSError
-        print(
-            f"could not download the CVs ({args.ref} of {args.repository}): {error}",
-            file=sys.stderr,
+        raise SystemExit(f"could not get the CVs ({from_path or ref}): {error}")
+    except (KeyError, ValueError, TypeError) as error:
+        raise SystemExit(
+            f"the CVs ({from_path or ref}) could not be read ({error!r}); nothing changed"
         )
-        return 1
-    except (KeyError, ValueError, SystemExit) as error:
-        print(
-            f"the CVs at {args.ref} could not be read ({error!r}); nothing changed",
-            file=sys.stderr,
+    load_bundle.cache_clear()
+    message = f"using CVs for ODS {ods} from {origin} ({source_ref[:7]}); wrote {destination}"
+    if ods not in shipped_versions():
+        message += (
+            f"\nwarning: this install has no checker for ODS {ods} (it supports "
+            f"{', '.join(shipped_versions())}); upgrade cc-plugin-obs4mips"
         )
-        return 1
+    return message
 
-    if bundle["ods_version"] != packaged["ods_version"]:
-        print(
-            f"the CVs at {args.ref} are for ODS {bundle['ods_version']} but this install checks "
-            f"ODS {packaged['ods_version']}. Upgrade cc-plugin-obs4mips instead.",
-            file=sys.stderr,
-        )
-        return 1
 
-    previous = (
-        json.loads(path.read_text(encoding="utf-8")) if path.is_file() else packaged
+def revert(ods_version: str | None = None) -> str:
+    """Remove updated snapshots (one ODS version or all); the shipped ones are used again."""
+    root = user_root()
+    targets = [root / ods_version] if ods_version else sorted(root.glob("*"))
+    removed = [t for t in targets if t.is_dir()]
+    for target in removed:
+        shutil.rmtree(target)
+    load_bundle.cache_clear()
+    if not removed:
+        return "nothing to revert: already using the shipped CVs"
+    return "reverted to the shipped CVs for ODS " + ", ".join(t.name for t in removed)
+
+
+def status() -> str:
+    lines = []
+    for ods in shipped_versions():
+        shipped = read_source(shipped_root() / ods)
+        in_use = load_bundle(ods)
+        lines.append(
+            f"ODS {ods}: using {in_use['source']} CVs "
+            f"(cv_version {in_use['cv_version']}, commit {in_use['cvs_ref'][:7]})"
+        )
+        lines.append(
+            f"  shipped: cv_version {shipped['cv_version']}, commit {shipped['ref'][:7]}"
+        )
+    updated = sorted(user_root().glob("*/SOURCE.json"))
+    lines.append(
+        f"updated copies: {', '.join(str(p.parent) for p in updated) if updated else 'none'}"
     )
-    if bundle_text(previous) == bundle_text(bundle):
-        print(f"already up to date (commit {sha})")
-        return 0
-    _write_atomic(path, bundle_text(bundle))
-    print(
-        f"updated CVs: {previous['cvs_ref'][:7]} -> {sha[:7]} ({args.ref}); wrote {path}"
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(update_main())
+    return "\n".join(lines)

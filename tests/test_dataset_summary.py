@@ -9,7 +9,9 @@ from cc_plugin_obs4mips.dataset_summary import (
     main,
     summarize_dataset,
 )
-from cc_plugin_obs4mips.enums import BUNDLE
+from cc_plugin_obs4mips.checks import Obs4MipsCheck
+
+BUNDLE = Obs4MipsCheck.bundle()
 
 
 def make_dataset(path):

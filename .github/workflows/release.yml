@@ -1,0 +1,41 @@
+name: release
+
+# Merge of `dev` into `main` is the release: python-semantic-release reads the conventional
+# commits (feat:, fix:), tags the next version and creates the GitHub release; the package,
+# including the shipped CVs, is then built and published to PyPI.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write # PyPI trusted publishing
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    concurrency: release
+    environment: pypi # the name given to the trusted publisher on PyPI
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag the next version
+        id: semrel
+        uses: python-semantic-release/python-semantic-release@v9
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@v5
+        if: steps.semrel.outputs.released == 'true'
+        with:
+          python-version: "3.10"
+      - name: Build
+        if: steps.semrel.outputs.released == 'true'
+        run: |
+          git pull --tags
+          python -m pip install uv && uv build
+          unzip -l dist/*.whl | grep -q "cc_plugin_obs4mips/data/.*/SOURCE.json" # CVs are inside
+      - name: Publish to PyPI
+        if: steps.semrel.outputs.released == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
