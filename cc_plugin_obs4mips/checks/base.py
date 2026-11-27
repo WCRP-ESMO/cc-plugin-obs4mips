@@ -63,10 +63,20 @@ class Obs4MipsCheckBase(BaseNCCheck, BaseCheck):
         14: "%Y%m%d%H%M%S",
     }
     FREQUENCY_TIME_DIGITS = {
-        "yr": 4, "dec": 4, "yrPt": 4,
-        "mon": 6, "monC": 6, "monPt": 6,
+        "yr": 4,
+        "dec": 4,
+        "yrPt": 4,
+        "mon": 6,
+        "monC": 6,
+        "monPt": 6,
         "day": 8,
-        "6hr": 12, "3hr": 12, "1hr": 12, "1hrCM": 12, "6hrPt": 12, "3hrPt": 12, "1hrPt": 12,
+        "6hr": 12,
+        "3hr": 12,
+        "1hr": 12,
+        "1hrCM": 12,
+        "6hrPt": 12,
+        "3hrPt": 12,
+        "1hrPt": 12,
         "subhrPt": 14,
     }
     VERSION_REGEX = r"v\d{8}"
@@ -105,7 +115,9 @@ class Obs4MipsCheckBase(BaseNCCheck, BaseCheck):
         if not all(isinstance(node, _CONDITION_NODES) for node in ast.walk(tree)):
             raise ValueError(f"unsupported condition: {expression!r}")
         names = {name: str(attrs.get(name, "")).strip() for name in self.ods_attrs}
-        return bool(eval(compile(tree, "<condition>", "eval"), {"__builtins__": {}}, names))
+        return bool(
+            eval(compile(tree, "<condition>", "eval"), {"__builtins__": {}}, names)
+        )
 
     @classmethod
     def split_value(cls, name: str, value: str) -> list[str]:
@@ -126,16 +138,32 @@ class Obs4MipsCheckBase(BaseNCCheck, BaseCheck):
         by_folded = {term.casefold(): term for term in allowed}
         unregistered = []
         for token in cls.split_value(name, value):
-            if token in allowed or any(re.match(pattern, token) for pattern in patterns):
+            if token in allowed or any(
+                re.match(pattern, token) for pattern in patterns
+            ):
                 continue
-            close = get_close_matches(token.casefold(), list(by_folded), n=3, cutoff=0.5)
+            close = get_close_matches(
+                token.casefold(), list(by_folded), n=3, cutoff=0.5
+            )
             unregistered.append((token, [by_folded[c] for c in close]))
         return unregistered
 
     @classmethod
+    def format_hint(cls, name: str) -> str:
+        """State the regex(es) an attribute value must match."""
+        patterns = cls.bundle()["attributes"][name].get("patterns", [])
+        if len(patterns) == 1:
+            return f"It must match the pattern {patterns[0]}"
+        return "It must match any one of the patterns: " + " | ".join(patterns)
+
+    @classmethod
     def _tokens(cls, name, value):
         """Values of an attribute that are strings (else none); multi-valued split."""
-        return cls.split_value(name, value) if isinstance(value, str) and value.strip() else []
+        return (
+            cls.split_value(name, value)
+            if isinstance(value, str) and value.strip()
+            else []
+        )
 
     def setup(self, ds):
         """Collect all global attributes from the supplied NetCDF."""
@@ -209,13 +237,22 @@ class Obs4MipsCheckBase(BaseNCCheck, BaseCheck):
             # (a term is registered if it is allowed OR matches ANY pattern)
             if "allowed" in attr or "patterns" in attr:
                 messages = []
+                # attributes with an enumerated list are CV problems; attributes with
+                # only patterns are format problems
+                is_format = "allowed" not in attr
                 # ... if an attribute value is present in the CVs
                 for token, similar in self.unregistered_terms(name, value):
-                    message = f"{name}={token!r} is not registered in the CV for {name}"
-                    if similar:
-                        message += ". Similar registered terms: " + ", ".join(
-                            map(repr, similar)
+                    if is_format:
+                        message = (
+                            f"{name}={token!r} does not have the expected format. "
+                            + self.format_hint(name)
                         )
+                    else:
+                        message = f"{name}={token!r} is not registered in the {name} CV"
+                        if similar:
+                            message += ". Similar registered terms: " + ", ".join(
+                                map(repr, similar)
+                            )
                     messages.append(message)
                 if messages:
                     # registered content is copied verbatim by data providers, so a
@@ -227,7 +264,7 @@ class Obs4MipsCheckBase(BaseNCCheck, BaseCheck):
                                 "recommended" if registered else "required"
                             ],
                             value=False,
-                            name="CVs mismatch",
+                            name="Format mismatch" if is_format else "CVs mismatch",
                             msgs=messages,
                         )
                     )
@@ -247,7 +284,11 @@ class Obs4MipsCheckBase(BaseNCCheck, BaseCheck):
             # a registered term is always valid, even if it breaks the character rule
             if value in self.ods_attrs.get(name, {}).get("allowed", []):
                 continue
-            regex = self.DRS_VARIABLE_ID_REGEX if name == "variable_id" else self.DRS_VALUE_REGEX
+            regex = (
+                self.DRS_VARIABLE_ID_REGEX
+                if name == "variable_id"
+                else self.DRS_VALUE_REGEX
+            )
             if re.fullmatch(regex, value):
                 continue
             allowed = (
@@ -415,7 +456,9 @@ class Obs4MipsCheckBase(BaseNCCheck, BaseCheck):
 
         # ensure time range matches the expected number of digits given the frequency
         start, end = match[1], match[2]
-        digits = self.FREQUENCY_TIME_DIGITS.get(frequency) if frequency is not None else None
+        digits = (
+            self.FREQUENCY_TIME_DIGITS.get(frequency) if frequency is not None else None
+        )
         if digits is not None and len(start) != digits:
             results.append(
                 Result(
@@ -439,7 +482,8 @@ class Obs4MipsCheckBase(BaseNCCheck, BaseCheck):
                     calendar=getattr(time_arr, "calendar", "standard"),
                 )
                 actual = tuple(
-                    d.strftime(self.ODS_DRS_TIME_RANGE_FORMATS[len(start)]) for d in dates
+                    d.strftime(self.ODS_DRS_TIME_RANGE_FORMATS[len(start)])
+                    for d in dates
                 )
             except (AttributeError, TypeError, ValueError):
                 actual = None  # an undecodable time axis is reported by the CF checks
