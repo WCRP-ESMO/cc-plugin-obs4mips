@@ -2,11 +2,19 @@ name: release
 
 # Merge of `dev` into `main` is the release: python-semantic-release reads the conventional
 # commits (feat:, fix:), tags the next version and creates the GitHub release; the package,
-# including the shipped CVs, is then built and published to PyPI.
+# including the shipped CVs, is then built from that tag and published to PyPI.
+#
+# The build always checks out the tag itself. Building from the branch tip is wrong: if
+# `main` has moved on since the release commit (a queued run, a later merge), setuptools-scm
+# computes a dev version with a local part (0.2.2.dev2+g...), which PyPI rejects.
+#
+# Run manually (workflow_dispatch) to publish the latest existing tag, e.g. when a release
+# was tagged but its upload failed. Tagging is skipped then.
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -23,22 +31,43 @@ jobs:
           fetch-depth: 0
       - name: Tag the next version
         id: semrel
+        if: github.event_name == 'push'
         uses: python-semantic-release/python-semantic-release@v9
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           # Only tag and release: no "chore(release)" commit, which the branch ruleset
           # (changes must go through a pull request) would reject.
           commit: "false"
+      - name: Pick the tag to publish
+        id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            git fetch --tags --force
+            tag=$(git describe --tags --abbrev=0 origin/main)
+          elif [ "${{ steps.semrel.outputs.released }}" = "true" ]; then
+            tag="${{ steps.semrel.outputs.tag }}"
+          else
+            tag=""
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Publishing: ${tag:-nothing (no release)}"
+      - uses: actions/checkout@v4
+        if: steps.pick.outputs.tag != ''
+        with:
+          ref: ${{ steps.pick.outputs.tag }}
+          fetch-depth: 0
       - uses: actions/setup-python@v5
-        if: steps.semrel.outputs.released == 'true'
+        if: steps.pick.outputs.tag != ''
         with:
           python-version: "3.10"
       - name: Build
-        if: steps.semrel.outputs.released == 'true'
+        if: steps.pick.outputs.tag != ''
         run: |
-          git pull --tags
           python -m pip install uv && uv build
+          # the version must be exactly the tag's (no .devN or +local part)
+          expected="${{ steps.pick.outputs.tag }}"
+          ls dist/*.whl | grep -q "cc_plugin_obs4mips-${expected#v}-" || { echo "::error::built $(ls dist) but expected ${expected#v}"; exit 1; }
           unzip -l dist/*.whl | grep -q "cc_plugin_obs4mips/data/.*/SOURCE.json" # CVs are inside
       - name: Publish to PyPI
-        if: steps.semrel.outputs.released == 'true'
+        if: steps.pick.outputs.tag != ''
         uses: pypa/gh-action-pypi-publish@release/v1
