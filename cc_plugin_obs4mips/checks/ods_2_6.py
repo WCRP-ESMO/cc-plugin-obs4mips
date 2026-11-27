@@ -380,13 +380,19 @@ class Obs4MipsCheck_2_6(Obs4MipsCheckBase):
                 and value.startswith("site-")
             ):
                 continue  # a wrong site id in grid_label is reported by check_grid_label
+            # describe the form, not the derived value (site_id may itself be a placeholder)
+            shown = (
+                "site-[site_id]"
+                if name == "grid_label" and product == "site-observations"
+                else wanted
+            )
             results.append(
                 Result(
                     weight=self._weight(name),
                     value=False,
                     name="Site",
                     msgs=[
-                        f"{name} must be {wanted!r} when product is {product!r}; found {value!r}"
+                        f"{name} must be {shown!r} when product is {product!r}; found {value!r}"
                     ],
                 )
             )
