@@ -495,3 +495,22 @@ class Obs4MipsCheck_2_6(Obs4MipsCheckBase):
                 )
             )
         return results
+
+    def check_variable_id(self, ds) -> list[Result]:
+        """The variable_id global attribute must name a variable in the file."""
+        variable_id = self.attrs.get("variable_id")
+        if not isinstance(variable_id, str) or not variable_id.strip():
+            return []  # absent or empty: check_global_attribute_presence reports it
+        if variable_id.strip() in ds.variables:
+            return []
+        return [
+            Result(
+                weight=self._weight("variable_id"),
+                value=False,
+                name="Variable ID",
+                msgs=[
+                    f"variable_id={variable_id!r} is not a variable in the file; "
+                    f"the file's variables are: {', '.join(map(repr, ds.variables))}"
+                ],
+            )
+        ]

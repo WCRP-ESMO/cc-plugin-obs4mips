@@ -837,6 +837,20 @@ def test_site_check_ignores_non_site_data_and_missing_attributes(run_check):
     assert run_check("check_site", **SITE, drop=("nominal_resolution",)) == []
 
 
+def test_variable_id_names_a_variable_in_the_file(run_check):
+    assert run_check("check_variable_id") == []
+
+
+def test_variable_id_that_is_not_a_variable_in_the_file(run_check):
+    results = run_check("check_variable_id", variable_name="pr")
+    assert [r.weight for r in results] == [HIGH]
+    assert "variable_id='tas'" in messages(results) and "'pr'" in messages(results)
+
+
+def test_variable_id_absent_is_left_to_the_presence_check(run_check):
+    assert run_check("check_variable_id", drop=("variable_id",)) == []
+
+
 # --------------------------------------------------------------------------------------
 # ODS versions
 # --------------------------------------------------------------------------------------
