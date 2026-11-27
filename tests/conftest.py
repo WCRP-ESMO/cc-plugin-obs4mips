@@ -79,6 +79,7 @@ def run_check(tmp_path, monkeypatch):
       time_values=...   replace the time axis (days since 2000-01-01)
       time_name=...     name of the time variable (default "time")
       time_axis=...     axis attribute of the time variable (default "T"; None omits it)
+      variable_name=... name of the data variable (default: the variable_id value)
       coords=...        (latitude centers, longitude centers) written as 1-D coordinates
                         (default GOOD_COORDS; None writes no latitude/longitude)
       creation_date     defaults to now, so it agrees with the file's modification time
@@ -88,7 +89,7 @@ def run_check(tmp_path, monkeypatch):
 
     def run(method, *, drop=(), directory=GOOD_DIRECTORY, filename=GOOD_FILENAME,
             time_values=(15.0, 45.0), time_name="time", time_axis="T",
-            coords=GOOD_COORDS, **changes):  # fmt: skip
+            coords=GOOD_COORDS, variable_name=None, **changes):  # fmt: skip
         values = {**GOOD_VALUES, **changes}
         if "creation_date" not in changes:  # the file is created now
             values["creation_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -111,7 +112,7 @@ def run_check(tmp_path, monkeypatch):
                     coord = ds.createVariable(name, "f8", (name,))
                     coord.standard_name, coord.units, coord.axis = std, units, axis
                     coord[:] = centers
-            variable = ds.createVariable(values["variable_id"], "f4", ("time",))
+            variable = ds.createVariable(variable_name or values["variable_id"], "f4", ("time",))
             variable.units = "K"
             if "units_metadata" in values:
                 variable.units_metadata = values.pop("units_metadata")
