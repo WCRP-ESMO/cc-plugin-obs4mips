@@ -1,0 +1,27 @@
+name: sync dev
+
+# A merge commit from `dev` into `main` exists only on `main`, so `dev` shows as one commit
+# behind. Fast-forward `dev` to `main` after every push to `main`. `--ff-only` never
+# rewrites history: if `dev` has new commits of its own, it fails instead of merging.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fast-forward-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+          # If a ruleset blocks pushes to dev, use a token (PAT/App) that may bypass it.
+          token: ${{ secrets.DEV_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: Fast-forward dev to main
+        run: |
+          git merge --ff-only origin/main
+          git push origin dev
